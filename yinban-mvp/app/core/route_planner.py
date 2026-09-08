@@ -6,11 +6,20 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class RoutePoint:
+    node_id: str
+    label: str
+    x: float
+    y: float
+
+
+@dataclass(frozen=True)
 class PlannedRoute:
     destination: str
     destination_name: str
     node_ids: list[str]
     labels: list[str]
+    points: list[RoutePoint]
     robot_route_id: str | None
 
     @property
@@ -50,11 +59,21 @@ class RoutePlanner:
         destination = destinations[-1]
         destination_config = self.routes["destinations"].get(destination)
         labels = [self.routes["nodes"][node_id]["label"] for node_id in node_ids]
+        points = [
+            RoutePoint(
+                node_id=node_id,
+                label=self.routes["nodes"][node_id]["label"],
+                x=self.routes["nodes"][node_id]["x"],
+                y=self.routes["nodes"][node_id]["y"],
+            )
+            for node_id in node_ids
+        ]
         return PlannedRoute(
             destination=destination,
             destination_name=self.routes["nodes"][current]["label"],
             node_ids=node_ids,
             labels=labels,
+            points=points,
             robot_route_id=(
                 destination_config.get("robotRouteId")
                 if len(destinations) == 1

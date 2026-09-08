@@ -20,6 +20,9 @@ class MockRobot:
         self._paused_total = 0.0
         self._manual_pause_at: float | None = None
         self._error: str | None = None
+        self._travel_duration = 5.0
+        self._block_at = 2.5
+        self._block_duration = 1.5
 
     def connect(self) -> None:
         return None
@@ -27,16 +30,18 @@ class MockRobot:
     def close(self) -> None:
         return None
 
-    def start(self, route_id: str) -> tuple[bool, str]:
+    def start(self, route_id: str, step_count: int = 2) -> tuple[bool, str]:
         with self._lock:
-            if route_id != "CARDIOLOGY":
-                return False, "该实体路线尚未实现"
+            if route_id not in {"CARDIOLOGY", "SIMULATION"}:
+                return False, "未知的模拟路线"
             self._route_id = route_id
             self._state = RobotState.MOVING
             self._started_at = self._clock()
             self._paused_total = 0.0
             self._manual_pause_at = None
             self._error = None
+            self._travel_duration = max(5.0, (step_count - 1) * 2.0)
+            self._block_at = self._travel_duration / 2.0
             return True, "模拟机器人已出发"
 
     def stop(self) -> tuple[bool, str]:
@@ -51,7 +56,9 @@ class MockRobot:
             if self._state not in {RobotState.BLOCKED, RobotState.LINE_LOST}:
                 return False, "当前状态无需继续"
             if self._state == RobotState.BLOCKED and self._started_at is not None:
-                self._started_at = self._clock() - 4.0
+                self._started_at = self._clock() - (
+                    self._block_at + self._block_duration
+                )
                 self._paused_total = 0.0
             self._state = RobotState.MOVING
             return True, "机器人继续运行"
@@ -77,8 +84,24 @@ class MockRobot:
                 route_id=self._route_id,
                 distance_cm=distance,
                 error=self._error,
+                progress=self._progress(),
                 updated_at=datetime.now(UTC),
             )
+
+    def _progress(self) -> float:
+        if self._state == RobotState.ARRIVED:
+            return 1.0
+        if self._started_at is None:
+            return 0.0
+        elapsed = max(0.0, self._clock() - self._started_at - self._paused_total)
+        if elapsed < self._block_at:
+            return elapsed / self._travel_duration
+        if elapsed < self._block_at + self._block_duration:
+            return self._block_at / self._travel_duration
+        return min(
+            1.0,
+            (elapsed - self._block_duration) / self._travel_duration,
+        )
 
     def _advance(self) -> None:
         if self._started_at is None or self._state in {
@@ -89,9 +112,9 @@ class MockRobot:
         }:
             return
         elapsed = self._clock() - self._started_at - self._paused_total
-        if 2.5 <= elapsed < 4.0:
+        if self._block_at <= elapsed < self._block_at + self._block_duration:
             self._state = RobotState.BLOCKED
-        elif elapsed >= 6.5:
+        elif elapsed >= self._travel_duration + self._block_duration:
             self._state = RobotState.ARRIVED
         else:
             self._state = RobotState.MOVING

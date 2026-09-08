@@ -457,9 +457,85 @@ h1 {
   border-radius: 1rem;
 }
 
-.map-card img {
+.map-card svg {
   width: 100%;
   height: auto;
+  overflow: visible;
+}
+
+.map-corridors {
+  fill: none;
+  stroke: #c7d5d0;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 18;
+}
+
+.route-highlight {
+  fill: none;
+  stroke: var(--gold);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 9;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.route-highlight.visible {
+  opacity: 1;
+}
+
+.map-node circle {
+  fill: white;
+  stroke: #8fa9a1;
+  stroke-width: 4;
+  transition: fill 0.2s ease, stroke 0.2s ease;
+}
+
+.map-node text {
+  fill: var(--muted);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.map-node.on-route circle {
+  fill: var(--green-soft);
+  stroke: var(--green);
+}
+
+.map-node.destination circle {
+  fill: var(--gold);
+  stroke: var(--green-dark);
+  stroke-width: 5;
+}
+
+.map-node.current text {
+  fill: var(--green-dark);
+}
+
+.guide-marker {
+  display: none;
+  filter: url(#marker-shadow);
+  transform-box: view-box;
+  transform-origin: 0 0;
+  transition: transform 0.5s linear;
+}
+
+.guide-marker.visible {
+  display: block;
+}
+
+.guide-marker circle {
+  fill: var(--green-dark);
+  stroke: white;
+  stroke-width: 4;
+}
+
+.guide-marker text {
+  fill: white;
+  font-size: 14px;
+  font-weight: 900;
+  text-anchor: middle;
 }
 
 .robot-panel {

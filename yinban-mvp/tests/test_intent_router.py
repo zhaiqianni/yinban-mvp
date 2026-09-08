@@ -73,7 +73,7 @@ def test_multiple_destination_reply_answers_every_stop() -> None:
     text = "我先去药房，再去检验科"
     reply = engine.reply(text, router.match(text))
     assert "第一站" in reply
-    assert "药房位于" in reply
+    assert "药房，位于" in reply
     assert "第二站" in reply
-    assert "检验科位于" in reply
+    assert "检验科，位于" in reply
     assert reply.index("药房") < reply.index("检验科")

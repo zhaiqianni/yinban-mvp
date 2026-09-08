@@ -31,6 +31,7 @@ class RobotSnapshot:
     route_id: str | None = None
     distance_cm: float | None = None
     error: str | None = None
+    progress: float | None = None
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 

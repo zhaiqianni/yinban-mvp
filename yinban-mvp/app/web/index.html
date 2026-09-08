@@ -50,7 +50,7 @@
           <span class="quick-icon" aria-hidden="true">药</span>
           <span>
             <strong>去药房</strong>
-            <small>一楼 · 路线展示</small>
+            <small>一楼 · 可模拟导引</small>
           </span>
         </button>
         <button class="quick-card toilet" type="button" data-query="厕所在哪里">
@@ -103,10 +103,48 @@
         <ol id="route-steps" class="route-steps">
           <li class="empty-step">选择一个地点后，这里会显示路线。</li>
         </ol>
-        <p id="route-note" class="route-note">只有“心内科”路线支持当前实体小车。</p>
+        <p id="route-note" class="route-note">已规划路线均可进行屏幕模拟；实体小车目前只支持心内科。</p>
       </div>
       <div class="map-card">
-        <img src="/static/assets/hospital-map.svg" alt="银伴演示医院简化地图">
+        <svg id="hospital-map" viewBox="0 0 600 330" role="img" aria-labelledby="map-title map-description">
+          <title id="map-title">银伴演示医院简化地图</title>
+          <desc id="map-description">选择目的地后，这里会按实际道路突出显示路线。</desc>
+          <defs>
+            <filter id="marker-shadow" x="-80%" y="-80%" width="260%" height="260%">
+              <feDropShadow dx="0" dy="4" stdDeviation="4" flood-opacity="0.3"/>
+            </filter>
+          </defs>
+          <rect width="600" height="330" rx="28" fill="#f7f4ec"/>
+          <path class="map-corridors"
+                d="M92 165H285L490 86M285 165V54M92 165V270M285 165V270H490"/>
+          <polyline id="route-highlight" class="route-highlight" points=""/>
+          <g class="map-nodes" font-family="Microsoft YaHei UI, sans-serif" text-anchor="middle">
+            <g class="map-node" data-node="lobby" transform="translate(92 165)">
+              <circle r="24"/><text y="50">门诊大厅</text>
+            </g>
+            <g class="map-node" data-node="elevator3" transform="translate(285 165)">
+              <circle r="24"/><text y="50">3号电梯口</text>
+            </g>
+            <g class="map-node" data-node="cardiology" transform="translate(490 86)">
+              <circle r="24"/><text y="52">心内科</text>
+            </g>
+            <g class="map-node" data-node="registration" transform="translate(285 54)">
+              <circle r="19"/><text y="-29">挂号处</text>
+            </g>
+            <g class="map-node" data-node="toilet" transform="translate(92 270)">
+              <circle r="19"/><text y="40">卫生间</text>
+            </g>
+            <g class="map-node" data-node="pharmacy" transform="translate(285 270)">
+              <circle r="19"/><text y="40">药房</text>
+            </g>
+            <g class="map-node" data-node="laboratory" transform="translate(490 270)">
+              <circle r="19"/><text y="40">检验科</text>
+            </g>
+          </g>
+          <g id="guide-marker" class="guide-marker" aria-hidden="true">
+            <circle r="17"/><text y="6">伴</text>
+          </g>
+        </svg>
       </div>
     </section>
 
@@ -134,4 +172,3 @@
   <script src="/static/js/app.js"></script>
 </body>
 </html>
-

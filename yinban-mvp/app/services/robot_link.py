@@ -21,7 +21,7 @@ class RobotController(Protocol):
 
     def close(self) -> None: ...
 
-    def start(self, route_id: str) -> tuple[bool, str]: ...
+    def start(self, route_id: str, step_count: int = 2) -> tuple[bool, str]: ...
 
     def stop(self) -> tuple[bool, str]: ...
 
@@ -77,7 +77,7 @@ class SerialRobotLink:
                 self._serial.close()
             self._serial = None
 
-    def start(self, route_id: str) -> tuple[bool, str]:
+    def start(self, route_id: str, step_count: int = 2) -> tuple[bool, str]:
         if route_id != "CARDIOLOGY":
             return False, "该实体路线尚未实现"
         accepted = self._write("START", route_id)

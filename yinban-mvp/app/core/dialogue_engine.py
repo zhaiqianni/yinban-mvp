@@ -24,13 +24,16 @@ class DialogueEngine:
                 stops = []
                 chinese_ordinals = "一二三四五六七八九十"
                 for index, destination in enumerate(destinations, start=1):
-                    answer = self.hospital["destinations"][destination]["answer"]
+                    destination_config = self.hospital["destinations"][destination]
                     ordinal = (
                         chinese_ordinals[index - 1]
                         if index <= len(chinese_ordinals)
                         else str(index)
                     )
-                    stops.append(f"第{ordinal}站：{answer}")
+                    stops.append(
+                        f"第{ordinal}站：{destination_config['name']}，"
+                        f"位于{destination_config['location']}。"
+                    )
                 return "按您说的顺序，" + " ".join(stops)
             return self.hospital["destinations"][result.destination]["answer"]
         if result.intent == "process" and result.destination:
