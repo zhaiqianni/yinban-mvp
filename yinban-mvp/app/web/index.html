@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b5c4d">
+  <title>银伴｜医院智能陪诊导引</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">银</span>
+      <div>
+        <strong>银伴</strong>
+        <span>医院智能陪诊导引</span>
+      </div>
+    </div>
+    <div class="system-status" aria-live="polite">
+      <span id="connection-dot" class="status-dot"></span>
+      <span id="mode-label">正在连接系统</span>
+    </div>
+  </header>
+
+  <main id="main" class="page-shell">
+    <section class="welcome-panel">
+      <div>
+        <p class="eyebrow">您好，我是您的就医向导</p>
+        <h1>请告诉我，您想去哪里？</h1>
+        <p class="intro">您可以直接说话，也可以点击下面的大按钮。</p>
+      </div>
+      <button id="demo-button" class="demo-button" type="button">
+        <span aria-hidden="true">▶</span>
+        一键演示
+      </button>
+    </section>
+
+    <section aria-labelledby="quick-title">
+      <h2 id="quick-title" class="section-title">常用服务</h2>
+      <div class="quick-grid">
+        <button class="quick-card cardiology" type="button" data-query="我要去心内科">
+          <span class="quick-icon" aria-hidden="true">♥</span>
+          <span>
+            <strong>去心内科</strong>
+            <small>三楼 · 可启动实体导引</small>
+          </span>
+        </button>
+        <button class="quick-card pharmacy" type="button" data-query="我要去药房取药">
+          <span class="quick-icon" aria-hidden="true">药</span>
+          <span>
+            <strong>去药房</strong>
+            <small>一楼 · 路线展示</small>
+          </span>
+        </button>
+        <button class="quick-card toilet" type="button" data-query="厕所在哪里">
+          <span class="quick-icon" aria-hidden="true">洗</span>
+          <span>
+            <strong>找卫生间</strong>
+            <small>一楼 · 服务台旁</small>
+          </span>
+        </button>
+        <button class="quick-card help" type="button" data-query="我不舒服，需要工作人员帮助">
+          <span class="quick-icon" aria-hidden="true">!</span>
+          <span>
+            <strong>人工求助</strong>
+            <small>触发本地提醒</small>
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <section class="interaction-grid">
+      <div class="talk-panel">
+        <h2 class="section-title">说出您的需求</h2>
+        <button id="voice-button" class="voice-button" type="button">
+          <span class="mic-icon" aria-hidden="true">●</span>
+          <span id="voice-label">按一下，开始说话</span>
+        </button>
+        <form id="query-form" class="query-form">
+          <label for="query-input">也可以在这里输入</label>
+          <div class="input-row">
+            <input id="query-input" name="query" maxlength="200" placeholder="例如：我下一步该做什么？" autocomplete="off">
+            <button type="submit">发送</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="answer-panel" aria-live="polite">
+        <div class="answer-heading">
+          <span class="assistant-avatar" aria-hidden="true">银</span>
+          <h2>银伴回答</h2>
+        </div>
+        <p id="recognized-text" class="recognized-text">等待您的问题</p>
+        <p id="answer-text" class="answer-text">您好！我可以帮您找科室、了解就医流程或联系现场工作人员。</p>
+      </div>
+    </section>
+
+    <section class="route-panel" aria-labelledby="route-title">
+      <div class="route-copy">
+        <p class="eyebrow">导引路线</p>
+        <h2 id="route-title">尚未选择目的地</h2>
+        <ol id="route-steps" class="route-steps">
+          <li class="empty-step">选择一个地点后，这里会显示路线。</li>
+        </ol>
+        <p id="route-note" class="route-note">只有“心内科”路线支持当前实体小车。</p>
+      </div>
+      <div class="map-card">
+        <img src="/static/assets/hospital-map.svg" alt="银伴演示医院简化地图">
+      </div>
+    </section>
+
+    <section class="robot-panel" aria-labelledby="robot-title">
+      <div>
+        <p class="eyebrow">机器人状态</p>
+        <h2 id="robot-title"><span id="robot-state">等待任务</span></h2>
+        <p id="robot-detail">系统启动后将自动连接模拟机器人或真实小车。</p>
+      </div>
+      <div class="robot-controls">
+        <button id="start-button" class="primary-control" type="button" disabled>开始导引</button>
+        <button id="resume-button" type="button">继续</button>
+        <button id="stop-button" class="danger-control" type="button">停止导引</button>
+        <button id="reset-button" type="button">复位</button>
+      </div>
+    </section>
+
+    <aside class="prototype-notice">
+      <strong>比赛原型说明：</strong>
+      本系统提供院内导引和流程信息，不进行医疗诊断；人工求助功能目前只触发本地提醒。
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
+

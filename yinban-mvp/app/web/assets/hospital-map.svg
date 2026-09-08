@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 330" role="img" aria-labelledby="title desc">
+  <title id="title">银伴演示医院简化地图</title>
+  <desc id="desc">从门诊大厅经过三号电梯到达心内科，同时标出挂号处、卫生间、药房和检验科。</desc>
+  <rect width="600" height="330" rx="28" fill="#f7f4ec"/>
+  <path d="M92 165H285L490 86M285 165V54M92 165V270M285 165V270H490"
+        fill="none" stroke="#c7d5d0" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M92 165H285L490 86"
+        fill="none" stroke="#0b5c4d" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="13 10"/>
+  <g font-family="Microsoft YaHei UI, sans-serif" text-anchor="middle">
+    <g transform="translate(92 165)">
+      <circle r="25" fill="#e7a93b" stroke="#083f36" stroke-width="5"/>
+      <text y="50" font-size="17" font-weight="700" fill="#17332e">门诊大厅</text>
+    </g>
+    <g transform="translate(285 165)">
+      <circle r="25" fill="#ffffff" stroke="#0b5c4d" stroke-width="5"/>
+      <text y="50" font-size="17" font-weight="700" fill="#17332e">3号电梯口</text>
+    </g>
+    <g transform="translate(490 86)">
+      <circle r="29" fill="#0b5c4d"/>
+      <text y="6" font-size="18" font-weight="900" fill="#ffffff">心</text>
+      <text y="52" font-size="18" font-weight="800" fill="#17332e">心内科</text>
+    </g>
+    <g transform="translate(285 54)">
+      <circle r="18" fill="#ffffff" stroke="#8fa9a1" stroke-width="4"/>
+      <text y="-27" font-size="15" font-weight="700" fill="#5c6f6b">挂号处</text>
+    </g>
+    <g transform="translate(92 270)">
+      <circle r="18" fill="#ffffff" stroke="#8fa9a1" stroke-width="4"/>
+      <text y="38" font-size="15" font-weight="700" fill="#5c6f6b">卫生间</text>
+    </g>
+    <g transform="translate(285 270)">
+      <circle r="18" fill="#ffffff" stroke="#8fa9a1" stroke-width="4"/>
+      <text y="38" font-size="15" font-weight="700" fill="#5c6f6b">药房</text>
+    </g>
+    <g transform="translate(490 270)">
+      <circle r="18" fill="#ffffff" stroke="#8fa9a1" stroke-width="4"/>
+      <text y="38" font-size="15" font-weight="700" fill="#5c6f6b">检验科</text>
+    </g>
+  </g>
+</svg>
+
