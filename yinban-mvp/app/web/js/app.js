@@ -64,7 +64,7 @@
     window.speechSynthesis.speak(utterance);
   }
 
-  function renderRoute(route, destination, physicalAvailable) {
+  function renderRoute(route, destination, physicalAvailable, destinationNames) {
     currentRoute = route || [];
     elements.routeSteps.innerHTML = "";
     if (!currentRoute.length) {
@@ -77,7 +77,9 @@
       return;
     }
 
-    elements.routeTitle.textContent = "前往" + destination;
+    elements.routeTitle.textContent = destinationNames && destinationNames.length > 1
+      ? "依次前往：" + destinationNames.join(" → ")
+      : "前往" + destination;
     currentRoute.forEach(function (label, index) {
       var item = document.createElement("li");
       item.textContent = label;
@@ -133,7 +135,12 @@
       var destinationName = result.route.length
         ? result.route[result.route.length - 1]
         : "";
-      renderRoute(result.route, destinationName, result.physical_available);
+      renderRoute(
+        result.route,
+        destinationName,
+        result.physical_available,
+        result.destination_names
+      );
       speak(result.answer);
       if (result.intent === "help") {
         showToast("已触发本地求助提醒，请联系现场工作人员。", true);
@@ -196,7 +203,8 @@
         renderRoute(
           restoredRoute.labels,
           restoredRoute.destination_name,
-          restoredRoute.physical_available
+          restoredRoute.physical_available,
+          [restoredRoute.destination_name]
         );
       }
       markRouteProgress(status.state);

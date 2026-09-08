@@ -12,6 +12,8 @@ class DialogueRequest(BaseModel):
 class DialogueResponse(BaseModel):
     intent: str
     destination: str | None = None
+    destinations: list[str] = Field(default_factory=list)
+    destination_names: list[str] = Field(default_factory=list)
     answer: str
     route: list[str] = Field(default_factory=list)
     robot_route_id: str | None = None

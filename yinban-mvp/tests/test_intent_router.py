@@ -37,6 +37,19 @@ def test_stop_has_priority() -> None:
     assert result.intent == "stop"
 
 
+def test_multiple_destinations_are_kept_in_spoken_order() -> None:
+    result = build_router().match("我先去药房，再去检验科")
+    assert result.intent == "navigate"
+    assert result.destination == "pharmacy"
+    assert result.destinations == ("pharmacy", "laboratory")
+
+
+def test_multiple_destinations_take_priority_over_generic_process_phrase() -> None:
+    result = build_router().match("我先去药房，再去检验科，应该怎么办")
+    assert result.intent == "navigate"
+    assert result.destinations == ("pharmacy", "laboratory")
+
+
 def test_empty_and_unknown_input() -> None:
     router = build_router()
     assert router.match("   ").intent == "unknown"
@@ -52,3 +65,15 @@ def test_medical_question_gets_safety_reply() -> None:
     assert "不能" in reply
     assert "医护人员" in reply
 
+
+def test_multiple_destination_reply_answers_every_stop() -> None:
+    hospital = load_json("hospital.json")
+    router = IntentRouter(hospital, load_json("intents.json"))
+    engine = DialogueEngine(hospital)
+    text = "我先去药房，再去检验科"
+    reply = engine.reply(text, router.match(text))
+    assert "第一站" in reply
+    assert "药房位于" in reply
+    assert "第二站" in reply
+    assert "检验科位于" in reply
+    assert reply.index("药房") < reply.index("检验科")

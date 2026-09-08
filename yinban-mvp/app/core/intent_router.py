@@ -9,6 +9,7 @@ from typing import Any
 class IntentResult:
     intent: str
     destination: str | None = None
+    destinations: tuple[str, ...] = ()
     matched_keyword: str | None = None
     confidence: float = 0.0
 
@@ -35,6 +36,17 @@ class IntentRouter:
             if self.normalize(keyword) in normalized:
                 return IntentResult("help", matched_keyword=keyword, confidence=1.0)
 
+        destination_matches = self._find_destinations(normalized)
+        if len(destination_matches) > 1:
+            destinations = tuple(item[0] for item in destination_matches)
+            return IntentResult(
+                "navigate",
+                destination=destinations[0],
+                destinations=destinations,
+                matched_keyword=destination_matches[0][1],
+                confidence=0.95,
+            )
+
         for process_id, process in self.hospital["processes"].items():
             for keyword in process["keywords"]:
                 if self.normalize(keyword) in normalized:
@@ -45,15 +57,34 @@ class IntentRouter:
                         confidence=0.9,
                     )
 
-        for destination_id, destination in self.hospital["destinations"].items():
-            aliases = sorted(destination["aliases"], key=len, reverse=True)
-            for alias in aliases:
-                if self.normalize(alias) in normalized:
-                    return IntentResult(
-                        "navigate",
-                        destination=destination_id,
-                        matched_keyword=alias,
-                        confidence=0.95,
-                    )
+        if destination_matches:
+            destination_id, alias = destination_matches[0]
+            return IntentResult(
+                "navigate",
+                destination=destination_id,
+                destinations=(destination_id,),
+                matched_keyword=alias,
+                confidence=0.95,
+            )
 
         return IntentResult("unknown", confidence=0.0)
+
+    def _find_destinations(self, normalized: str) -> list[tuple[str, str]]:
+        """Return distinct destinations in the order they appear in the request."""
+        matches: list[tuple[int, int, str, str]] = []
+        for destination_id, destination in self.hospital["destinations"].items():
+            for alias in destination["aliases"]:
+                normalized_alias = self.normalize(alias)
+                position = normalized.find(normalized_alias)
+                if position >= 0:
+                    matches.append(
+                        (position, -len(normalized_alias), destination_id, alias)
+                    )
+
+        ordered: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for _, _, destination_id, alias in sorted(matches):
+            if destination_id not in seen:
+                seen.add(destination_id)
+                ordered.append((destination_id, alias))
+        return ordered

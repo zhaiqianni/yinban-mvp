@@ -30,19 +30,36 @@ class RoutePlanner:
             self.graph[right].append(left)
 
     def plan(self, destination: str) -> PlannedRoute:
-        destination_config = self.routes["destinations"].get(destination)
-        if destination_config is None:
-            raise KeyError(f"Unknown destination: {destination}")
+        return self.plan_sequence([destination])
 
-        target = destination_config["node"]
-        node_ids = self._shortest_path(self.start_node, target)
+    def plan_sequence(self, destinations: list[str] | tuple[str, ...]) -> PlannedRoute:
+        if not destinations:
+            raise ValueError("At least one destination is required")
+
+        node_ids: list[str] = [self.start_node]
+        current = self.start_node
+        for destination in destinations:
+            destination_config = self.routes["destinations"].get(destination)
+            if destination_config is None:
+                raise KeyError(f"Unknown destination: {destination}")
+            target = destination_config["node"]
+            segment = self._shortest_path(current, target)
+            node_ids.extend(segment[1:])
+            current = target
+
+        destination = destinations[-1]
+        destination_config = self.routes["destinations"].get(destination)
         labels = [self.routes["nodes"][node_id]["label"] for node_id in node_ids]
         return PlannedRoute(
             destination=destination,
-            destination_name=self.routes["nodes"][target]["label"],
+            destination_name=self.routes["nodes"][current]["label"],
             node_ids=node_ids,
             labels=labels,
-            robot_route_id=destination_config.get("robotRouteId"),
+            robot_route_id=(
+                destination_config.get("robotRouteId")
+                if len(destinations) == 1
+                else None
+            ),
         )
 
     def _shortest_path(self, start: str, target: str) -> list[str]:
@@ -58,4 +75,3 @@ class RoutePlanner:
                     visited.add(neighbor)
                     queue.append([*path, neighbor])
         raise ValueError(f"No route from {start} to {target}")
-

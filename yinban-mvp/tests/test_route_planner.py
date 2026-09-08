@@ -23,7 +23,14 @@ def test_pharmacy_is_display_only() -> None:
     assert route.physical_available is False
 
 
+def test_multiple_destinations_are_planned_in_order() -> None:
+    route = build_planner().plan_sequence(["pharmacy", "laboratory"])
+    assert route.labels == ["门诊大厅", "药房", "检验科"]
+    assert route.destination == "laboratory"
+    assert route.robot_route_id is None
+    assert route.physical_available is False
+
+
 def test_unknown_destination_is_rejected() -> None:
     with pytest.raises(KeyError):
         build_planner().plan("airport")
-
