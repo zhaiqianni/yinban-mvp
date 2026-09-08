@@ -1,0 +1,27 @@
+{
+  "nodes": {
+    "lobby": {"label": "门诊大厅", "x": 80, "y": 150},
+    "elevator3": {"label": "3号电梯口", "x": 280, "y": 150},
+    "cardiology": {"label": "心内科", "x": 500, "y": 75},
+    "pharmacy": {"label": "药房", "x": 280, "y": 260},
+    "toilet": {"label": "卫生间", "x": 80, "y": 260},
+    "laboratory": {"label": "检验科", "x": 500, "y": 260},
+    "registration": {"label": "挂号处", "x": 280, "y": 45}
+  },
+  "edges": [
+    ["lobby", "elevator3"],
+    ["elevator3", "cardiology"],
+    ["lobby", "pharmacy"],
+    ["lobby", "toilet"],
+    ["pharmacy", "laboratory"],
+    ["lobby", "registration"]
+  ],
+  "destinations": {
+    "cardiology": {"node": "cardiology", "robotRouteId": "CARDIOLOGY"},
+    "pharmacy": {"node": "pharmacy", "robotRouteId": null},
+    "toilet": {"node": "toilet", "robotRouteId": null},
+    "laboratory": {"node": "laboratory", "robotRouteId": null},
+    "registration": {"node": "registration", "robotRouteId": null}
+  }
+}
+
