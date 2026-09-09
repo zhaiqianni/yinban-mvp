@@ -16,9 +16,11 @@
 
 ## 快速启动
 
-在 PowerShell 中进入本目录，然后运行：
+最简单的方法是双击项目目录中的 `start-yinban.cmd`。这个启动器只为本次启动临时绕过 PowerShell 脚本限制，不会修改 Windows 的全局执行策略。
 
-    .\run.ps1
+也可以在 PowerShell 中进入本目录，然后运行：
+
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\run.ps1
 
 首次运行会创建 .venv 并安装依赖。看到服务启动后，在 Edge 或 Chrome 中打开：
 
