@@ -23,11 +23,14 @@ def navigation(destination: str, request: Request) -> RouteResponse:
             RoutePointResponse(
                 node_id=point.node_id,
                 label=point.label,
+                floor=point.floor,
+                kind=point.kind,
                 x=point.x,
                 y=point.y,
             )
             for point in route.points
         ],
         robot_route_id=route.robot_route_id,
+        physical_handoff_node_id=route.physical_handoff_node_id,
         physical_available=route.physical_available,
     )

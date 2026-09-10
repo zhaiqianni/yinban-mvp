@@ -1,26 +1,32 @@
 {
   "nodes": {
-    "lobby": {"label": "门诊大厅", "x": 92, "y": 165},
-    "elevator3": {"label": "3号电梯口", "x": 285, "y": 165},
-    "cardiology": {"label": "心内科", "x": 490, "y": 86},
-    "pharmacy": {"label": "药房", "x": 285, "y": 270},
-    "toilet": {"label": "卫生间", "x": 92, "y": 270},
-    "laboratory": {"label": "检验科", "x": 490, "y": 270},
-    "registration": {"label": "挂号处", "x": 285, "y": 54}
+    "lobby_1f": {"label": "门诊大厅", "floor": 1, "kind": "place", "x": 95, "y": 165},
+    "elevator3_1f": {"label": "3号电梯", "floor": 1, "kind": "elevator", "x": 300, "y": 165},
+    "registration_1f": {"label": "挂号处", "floor": 1, "kind": "place", "x": 300, "y": 54},
+    "toilet_1f": {"label": "卫生间", "floor": 1, "kind": "place", "x": 95, "y": 270},
+    "pharmacy_1f": {"label": "药房", "floor": 1, "kind": "place", "x": 300, "y": 270},
+    "laboratory_1f": {"label": "检验科", "floor": 1, "kind": "place", "x": 505, "y": 270},
+    "elevator3_3f": {"label": "3号电梯", "floor": 3, "kind": "elevator", "x": 140, "y": 165},
+    "cardiology_3f": {"label": "心内科", "floor": 3, "kind": "place", "x": 470, "y": 165}
   },
   "edges": [
-    ["lobby", "elevator3"],
-    ["elevator3", "cardiology"],
-    ["elevator3", "pharmacy"],
-    ["lobby", "toilet"],
-    ["pharmacy", "laboratory"],
-    ["elevator3", "registration"]
+    ["lobby_1f", "elevator3_1f"],
+    ["elevator3_1f", "elevator3_3f"],
+    ["elevator3_3f", "cardiology_3f"],
+    ["elevator3_1f", "pharmacy_1f"],
+    ["lobby_1f", "toilet_1f"],
+    ["pharmacy_1f", "laboratory_1f"],
+    ["elevator3_1f", "registration_1f"]
   ],
   "destinations": {
-    "cardiology": {"node": "cardiology", "robotRouteId": "CARDIOLOGY"},
-    "pharmacy": {"node": "pharmacy", "robotRouteId": null},
-    "toilet": {"node": "toilet", "robotRouteId": null},
-    "laboratory": {"node": "laboratory", "robotRouteId": null},
-    "registration": {"node": "registration", "robotRouteId": null}
+    "cardiology": {
+      "node": "cardiology_3f",
+      "robotRouteId": "CARDIOLOGY",
+      "physicalHandoffNodeId": "elevator3_1f"
+    },
+    "pharmacy": {"node": "pharmacy_1f", "robotRouteId": null},
+    "toilet": {"node": "toilet_1f", "robotRouteId": null},
+    "laboratory": {"node": "laboratory_1f", "robotRouteId": null},
+    "registration": {"node": "registration_1f", "robotRouteId": null}
   }
 }

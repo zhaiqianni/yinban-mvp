@@ -1,6 +1,6 @@
 {
   "hospitalName": "银伴演示医院",
-  "startNode": "lobby",
+  "startNode": "lobby_1f",
   "destinations": {
     "cardiology": {
       "name": "心内科",
@@ -48,4 +48,3 @@
     }
   }
 }
-

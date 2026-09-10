@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b5c4d">
   <title>银伴｜医院智能陪诊导引</title>
-  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/css/app.css?v=20260910-floor3">
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -43,7 +43,7 @@
           <span class="quick-icon" aria-hidden="true">♥</span>
           <span>
             <strong>去心内科</strong>
-            <small>三楼 · 可启动实体导引</small>
+            <small>三楼 · 电梯后屏幕续引</small>
           </span>
         </button>
         <button class="quick-card pharmacy" type="button" data-query="我要去药房取药">
@@ -106,8 +106,22 @@
         <p id="route-note" class="route-note">已规划路线均可进行屏幕模拟；实体小车目前只支持心内科。</p>
       </div>
       <div class="map-card">
+        <div class="map-toolbar" aria-label="楼层地图切换">
+          <strong id="floor-summary">当前显示：一楼</strong>
+          <div class="floor-tabs">
+            <button class="floor-tab active" type="button" data-floor="1" aria-pressed="true">一楼</button>
+            <button class="floor-tab" type="button" data-floor="3" aria-pressed="false">三楼</button>
+          </div>
+        </div>
+        <div id="elevator-transition" class="elevator-transition" role="status" aria-live="assertive" hidden>
+          <span class="elevator-icon" aria-hidden="true">↕</span>
+          <div>
+            <strong id="elevator-transition-title">正在乘坐3号电梯</strong>
+            <span id="elevator-transition-detail">一楼 → 三楼</span>
+          </div>
+        </div>
         <svg id="hospital-map" viewBox="0 0 600 330" role="img" aria-labelledby="map-title map-description">
-          <title id="map-title">银伴演示医院简化地图</title>
+          <title id="map-title">银伴演示医院分楼层地图</title>
           <desc id="map-description">选择目的地后，这里会按实际道路突出显示路线。</desc>
           <defs>
             <filter id="marker-shadow" x="-80%" y="-80%" width="260%" height="260%">
@@ -115,30 +129,43 @@
             </filter>
           </defs>
           <rect width="600" height="330" rx="28" fill="#f7f4ec"/>
-          <path class="map-corridors"
-                d="M92 165H285L490 86M285 165V54M92 165V270M285 165V270H490"/>
-          <polyline id="route-highlight" class="route-highlight" points=""/>
-          <g class="map-nodes" font-family="Microsoft YaHei UI, sans-serif" text-anchor="middle">
-            <g class="map-node" data-node="lobby" transform="translate(92 165)">
-              <circle r="24"/><text y="50">门诊大厅</text>
+          <g class="map-floor" data-floor="1">
+            <text class="map-floor-label" x="36" y="38">门诊楼一楼</text>
+            <path class="map-corridors"
+                  d="M95 165H300M300 165V54M95 165V270M300 165V270H505"/>
+            <polyline class="route-highlight" data-floor="1" points=""/>
+            <g class="map-nodes" font-family="Microsoft YaHei UI, sans-serif" text-anchor="middle">
+              <g class="map-node" data-node="lobby_1f" transform="translate(95 165)">
+                <circle r="24"/><text y="50">门诊大厅</text>
+              </g>
+              <g class="map-node" data-node="elevator3_1f" transform="translate(300 165)">
+                <circle r="24"/><text y="50">3号电梯</text>
+              </g>
+              <g class="map-node" data-node="registration_1f" transform="translate(300 54)">
+                <circle r="19"/><text y="-29">挂号处</text>
+              </g>
+              <g class="map-node" data-node="toilet_1f" transform="translate(95 270)">
+                <circle r="19"/><text y="40">卫生间</text>
+              </g>
+              <g class="map-node" data-node="pharmacy_1f" transform="translate(300 270)">
+                <circle r="19"/><text y="40">药房</text>
+              </g>
+              <g class="map-node" data-node="laboratory_1f" transform="translate(505 270)">
+                <circle r="19"/><text y="40">检验科</text>
+              </g>
             </g>
-            <g class="map-node" data-node="elevator3" transform="translate(285 165)">
-              <circle r="24"/><text y="50">3号电梯口</text>
-            </g>
-            <g class="map-node" data-node="cardiology" transform="translate(490 86)">
-              <circle r="24"/><text y="52">心内科</text>
-            </g>
-            <g class="map-node" data-node="registration" transform="translate(285 54)">
-              <circle r="19"/><text y="-29">挂号处</text>
-            </g>
-            <g class="map-node" data-node="toilet" transform="translate(92 270)">
-              <circle r="19"/><text y="40">卫生间</text>
-            </g>
-            <g class="map-node" data-node="pharmacy" transform="translate(285 270)">
-              <circle r="19"/><text y="40">药房</text>
-            </g>
-            <g class="map-node" data-node="laboratory" transform="translate(490 270)">
-              <circle r="19"/><text y="40">检验科</text>
+          </g>
+          <g class="map-floor is-hidden" data-floor="3" aria-hidden="true">
+            <text class="map-floor-label" x="36" y="38">门诊楼三楼</text>
+            <path class="map-corridors" d="M140 165H470"/>
+            <polyline class="route-highlight" data-floor="3" points=""/>
+            <g class="map-nodes" font-family="Microsoft YaHei UI, sans-serif" text-anchor="middle">
+              <g class="map-node" data-node="elevator3_3f" transform="translate(140 165)">
+                <circle r="24"/><text y="50">3号电梯</text>
+              </g>
+              <g class="map-node" data-node="cardiology_3f" transform="translate(470 165)">
+                <circle r="24"/><text y="50">心内科</text>
+              </g>
             </g>
           </g>
           <g id="guide-marker" class="guide-marker" aria-hidden="true">
@@ -169,6 +196,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/app.js?v=20260910-floor3"></script>
 </body>
 </html>

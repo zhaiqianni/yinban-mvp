@@ -14,7 +14,9 @@ def test_health_and_dialogue_api() -> None:
         payload = response.json()
         assert payload["intent"] == "navigate"
         assert payload["robot_route_id"] == "CARDIOLOGY"
+        assert payload["physical_handoff_node_id"] == "elevator3_1f"
         assert payload["physical_available"] is True
+        assert [point["floor"] for point in payload["route_points"]] == [1, 1, 3, 3]
 
 
 def test_dialogue_api_returns_all_requested_destinations() -> None:
@@ -29,12 +31,17 @@ def test_dialogue_api_returns_all_requested_destinations() -> None:
         assert payload["intent"] == "navigate"
         assert payload["destinations"] == ["pharmacy", "laboratory"]
         assert payload["destination_names"] == ["药房", "检验科"]
-        assert payload["route"] == ["门诊大厅", "3号电梯口", "药房", "检验科"]
+        assert payload["route"] == [
+            "门诊大厅（一楼）",
+            "3号电梯口（一楼）",
+            "药房（一楼）",
+            "检验科（一楼）",
+        ]
         assert [point["node_id"] for point in payload["route_points"]] == [
-            "lobby",
-            "elevator3",
-            "pharmacy",
-            "laboratory",
+            "lobby_1f",
+            "elevator3_1f",
+            "pharmacy_1f",
+            "laboratory_1f",
         ]
         assert "药房，位于" in payload["answer"]
         assert "检验科，位于" in payload["answer"]
@@ -67,13 +74,15 @@ def test_simulation_route_can_start_without_a_physical_route() -> None:
             json={"text": "先去卫生间，再去挂号处，然后去心内科"},
         ).json()
         assert dialogue["route"] == [
-            "门诊大厅",
-            "卫生间",
-            "门诊大厅",
-            "3号电梯口",
-            "挂号处",
-            "3号电梯口",
-            "心内科",
+            "门诊大厅（一楼）",
+            "卫生间（一楼）",
+            "门诊大厅（一楼）",
+            "3号电梯口（一楼）",
+            "挂号处（一楼）",
+            "3号电梯入口（一楼）",
+            "乘坐3号电梯前往三楼",
+            "3号电梯出口（三楼）",
+            "心内科（三楼）",
         ]
         response = client.post(
             "/api/robot/start",
@@ -81,6 +90,32 @@ def test_simulation_route_can_start_without_a_physical_route() -> None:
         )
         assert dialogue["guide_available"] is True
         assert response.json()["accepted"] is True
+
+
+def test_dialogue_api_returns_cross_floor_round_trip() -> None:
+    app = create_app(Settings(mode="simulation"), MockRobot())
+    with TestClient(app) as client:
+        payload = client.post(
+            "/api/dialogue",
+            json={"text": "我想去心内科然后再去卫生间"},
+        ).json()
+        assert payload["destination_names"] == ["心内科", "卫生间"]
+        assert "乘坐3号电梯前往三楼" in payload["route"]
+        assert "乘坐3号电梯返回一楼" in payload["route"]
+        assert "路线中将乘坐3号电梯前往三楼" in payload["answer"]
+        assert "随后乘坐3号电梯返回一楼" in payload["answer"]
+        assert [point["floor"] for point in payload["route_points"]] == [
+            1,
+            1,
+            3,
+            3,
+            3,
+            1,
+            1,
+            1,
+        ]
+        assert payload["guide_route_id"] == "SIMULATION"
+        assert payload["guide_available"] is True
 
 
 def test_display_only_route_cannot_start_robot() -> None:

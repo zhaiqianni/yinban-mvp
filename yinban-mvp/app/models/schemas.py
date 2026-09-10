@@ -12,6 +12,8 @@ class DialogueRequest(BaseModel):
 class RoutePointResponse(BaseModel):
     node_id: str
     label: str
+    floor: int
+    kind: str
     x: float
     y: float
 
@@ -25,6 +27,7 @@ class DialogueResponse(BaseModel):
     route: list[str] = Field(default_factory=list)
     route_points: list[RoutePointResponse] = Field(default_factory=list)
     robot_route_id: str | None = None
+    physical_handoff_node_id: str | None = None
     physical_available: bool = False
     guide_route_id: str | None = None
     guide_available: bool = False
@@ -37,6 +40,7 @@ class RouteResponse(BaseModel):
     labels: list[str]
     points: list[RoutePointResponse]
     robot_route_id: str | None
+    physical_handoff_node_id: str | None
     physical_available: bool
 
 

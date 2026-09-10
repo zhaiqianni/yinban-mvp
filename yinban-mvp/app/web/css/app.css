@@ -386,11 +386,13 @@ h1 {
   margin: 1.25rem 0;
   padding: 0;
   list-style: none;
+  overflow-x: auto;
+  scrollbar-color: #9fb7b0 transparent;
 }
 
 .route-steps li {
   position: relative;
-  flex: 1;
+  flex: 0 0 8.5rem;
   padding: 2.4rem 0.4rem 0;
   text-align: center;
   color: var(--muted);
@@ -431,6 +433,23 @@ h1 {
   box-shadow: 0 0 0 2px var(--green);
 }
 
+.route-steps li.elevator-step {
+  color: #805813;
+}
+
+.route-steps li.elevator-step::before {
+  content: "↕";
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  color: white;
+  background: var(--gold);
+  border-radius: 0.35rem;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
 .route-steps .empty-step {
   padding: 1rem;
   text-align: left;
@@ -449,12 +468,103 @@ h1 {
 }
 
 .map-card {
-  display: grid;
-  place-items: center;
+  position: relative;
   min-height: 16rem;
   padding: 1rem;
   background: var(--paper);
   border-radius: 1rem;
+  overflow: hidden;
+}
+
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2.6rem;
+  padding: 0 0.25rem 0.55rem;
+}
+
+.map-toolbar strong {
+  color: var(--green-dark);
+}
+
+.floor-tabs {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.floor-tab {
+  min-width: 4rem;
+  min-height: 2.4rem;
+  padding: 0.4rem 0.7rem;
+  color: var(--green-dark);
+  background: white;
+  border: 2px solid #b9c9c4;
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.floor-tab.active {
+  color: white;
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.elevator-transition {
+  position: absolute;
+  inset: 4.3rem 1.2rem 1.2rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  color: white;
+  background: rgba(8, 63, 54, 0.94);
+  border: 4px solid var(--gold);
+  border-radius: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.elevator-transition[hidden] {
+  display: none;
+}
+
+.elevator-transition strong,
+.elevator-transition span {
+  display: block;
+}
+
+.elevator-transition strong {
+  margin-bottom: 0.35rem;
+  font-size: clamp(1.15rem, 3vw, 1.65rem);
+}
+
+.elevator-transition span:last-child {
+  color: #f6ddb0;
+  font-weight: 800;
+}
+
+.elevator-icon {
+  display: grid !important;
+  flex: 0 0 3.5rem;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  color: var(--green-dark) !important;
+  background: var(--gold);
+  border-radius: 50%;
+  font-size: 2rem;
+}
+
+.map-floor.is-hidden {
+  display: none;
+}
+
+.map-floor-label {
+  fill: var(--green-dark);
+  font-size: 20px;
+  font-weight: 900;
 }
 
 .map-card svg {
@@ -674,6 +784,7 @@ h1 {
   .route-steps {
     align-items: flex-start;
     flex-direction: column;
+    overflow-x: visible;
   }
 
   .route-steps li {

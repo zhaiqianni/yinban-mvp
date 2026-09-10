@@ -34,10 +34,17 @@ def dialogue(payload: DialogueRequest, request: Request) -> DialogueResponse:
     if result.intent == "navigate" and result.destination:
         route = runtime.route_planner.plan_sequence(destinations)
         route_labels = route.labels
+        elevator_steps = [
+            label for label in route_labels if label.startswith("乘坐3号电梯")
+        ]
+        if elevator_steps:
+            answer += " 路线中将" + "，随后".join(elevator_steps) + "。"
         route_points = [
             RoutePointResponse(
                 node_id=point.node_id,
                 label=point.label,
+                floor=point.floor,
+                kind=point.kind,
                 x=point.x,
                 y=point.y,
             )
@@ -60,6 +67,11 @@ def dialogue(payload: DialogueRequest, request: Request) -> DialogueResponse:
         route=route_labels,
         route_points=route_points,
         robot_route_id=robot_route_id,
+        physical_handoff_node_id=(
+            route.physical_handoff_node_id
+            if result.intent == "navigate" and result.destination
+            else None
+        ),
         physical_available=physical_available,
         guide_route_id=guide_route_id,
         guide_available=guide_available,

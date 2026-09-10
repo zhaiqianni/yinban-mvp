@@ -16,9 +16,15 @@
     voiceLabel: document.getElementById("voice-label"),
     queryInput: document.getElementById("query-input"),
     queryForm: document.getElementById("query-form"),
-    routeHighlight: document.getElementById("route-highlight"),
+    routeHighlights: document.querySelectorAll(".route-highlight"),
     guideMarker: document.getElementById("guide-marker"),
     mapDescription: document.getElementById("map-description"),
+    mapFloors: document.querySelectorAll(".map-floor"),
+    floorTabs: document.querySelectorAll(".floor-tab"),
+    floorSummary: document.getElementById("floor-summary"),
+    elevatorTransition: document.getElementById("elevator-transition"),
+    elevatorTransitionTitle: document.getElementById("elevator-transition-title"),
+    elevatorTransitionDetail: document.getElementById("elevator-transition-detail"),
     toast: document.getElementById("toast")
   };
 
@@ -29,11 +35,17 @@
   var currentRoute = [];
   var currentRoutePoints = [];
   var currentDestinationNames = [];
+  var currentFloor = 1;
+  var currentFloorSequence = [];
+  var currentPhysicalHandoffNodeId = null;
   var currentGuideProgress = 0;
   var lastProgressUpdateAt = null;
   var listening = false;
   var toastTimer = null;
   var lastRobotState = null;
+  var lastElevatorTransitionKey = null;
+  var screenContinuationFrame = null;
+  var screenContinuationStarted = false;
 
   var stateLabels = {
     IDLE: "等待任务",
@@ -88,28 +100,101 @@
     }
   }
 
+  function floorName(floor) {
+    var names = {1: "一楼", 2: "二楼", 3: "三楼"};
+    return names[Number(floor)] || String(floor) + "楼";
+  }
+
+  function floorSequence(routePoints) {
+    var floors = [];
+    (routePoints || []).forEach(function (point) {
+      var floor = Number(point.floor);
+      if (!floors.length || floors[floors.length - 1] !== floor) {
+        floors.push(floor);
+      }
+    });
+    return floors;
+  }
+
+  function updateFloorSummary() {
+    var routeText = currentFloorSequence.length
+      ? "路线楼层：" + currentFloorSequence.map(floorName).join(" → ") + " · "
+      : "";
+    elements.floorSummary.textContent = routeText + "当前显示：" + floorName(currentFloor);
+  }
+
+  function showFloor(floor) {
+    currentFloor = Number(floor) || 1;
+    elements.mapFloors.forEach(function (layer) {
+      var active = Number(layer.getAttribute("data-floor")) === currentFloor;
+      layer.classList.toggle("is-hidden", !active);
+      layer.setAttribute("aria-hidden", active ? "false" : "true");
+    });
+    elements.floorTabs.forEach(function (button) {
+      var active = Number(button.getAttribute("data-floor")) === currentFloor;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    updateFloorSummary();
+  }
+
+  function hideElevatorTransition() {
+    elements.elevatorTransition.hidden = true;
+    lastElevatorTransitionKey = null;
+  }
+
+  function showElevatorTransition(fromFloor, toFloor) {
+    var direction = Number(toFloor) > Number(fromFloor) ? "前往" : "返回";
+    elements.elevatorTransitionTitle.textContent =
+      "正在乘坐3号电梯" + direction + floorName(toFloor);
+    elements.elevatorTransitionDetail.textContent =
+      floorName(fromFloor) + " → " + floorName(toFloor);
+    elements.elevatorTransition.hidden = false;
+    var transitionKey = String(fromFloor) + "-" + String(toFloor);
+    if (lastElevatorTransitionKey !== transitionKey) {
+      speak(
+        "已进入三号电梯，正在" + direction + floorName(toFloor) + "。"
+      );
+      lastElevatorTransitionKey = transitionKey;
+    }
+  }
+
   function renderMap(routePoints, destinationNames) {
     currentRoutePoints = routePoints || [];
     currentDestinationNames = destinationNames || [];
+    currentFloorSequence = floorSequence(currentRoutePoints);
     document.querySelectorAll(".map-node").forEach(function (node) {
       node.classList.remove("on-route", "destination", "current");
     });
+    elements.routeHighlights.forEach(function (highlight) {
+      highlight.setAttribute("points", "");
+      highlight.classList.remove("visible");
+    });
+    hideElevatorTransition();
 
     if (!currentRoutePoints.length) {
-      elements.routeHighlight.setAttribute("points", "");
-      elements.routeHighlight.classList.remove("visible");
       elements.guideMarker.classList.remove("visible");
       elements.mapDescription.textContent = "选择目的地后，这里会按实际道路突出显示路线。";
+      currentFloorSequence = [];
+      showFloor(1);
       return;
     }
 
-    elements.routeHighlight.setAttribute(
-      "points",
-      currentRoutePoints.map(function (point) {
-        return point.x + "," + point.y;
-      }).join(" ")
-    );
-    elements.routeHighlight.classList.add("visible");
+    elements.routeHighlights.forEach(function (highlight) {
+      var floor = Number(highlight.getAttribute("data-floor"));
+      var points = currentRoutePoints.filter(function (point) {
+        return Number(point.floor) === floor;
+      });
+      if (points.length >= 2) {
+        highlight.setAttribute(
+          "points",
+          points.map(function (point) {
+            return point.x + "," + point.y;
+          }).join(" ")
+        );
+        highlight.classList.add("visible");
+      }
+    });
     currentRoutePoints.forEach(function (point) {
       var node = document.querySelector('.map-node[data-node="' + point.node_id + '"]');
       if (node) {
@@ -121,7 +206,49 @@
     });
     elements.mapDescription.textContent = "当前路线：" + currentRoute.join("，然后前往");
     elements.guideMarker.classList.add("visible");
+    showFloor(currentRoutePoints[0].floor);
     setGuideProgress(0, "IDLE");
+  }
+
+  function segmentLength(start, end) {
+    if (Number(start.floor) !== Number(end.floor)) {
+      return 190;
+    }
+    return Math.max(60, Math.hypot(end.x - start.x, end.y - start.y));
+  }
+
+  function routeMetrics() {
+    var lengths = [];
+    var total = 0;
+    for (var index = 1; index < currentRoutePoints.length; index += 1) {
+      var length = segmentLength(currentRoutePoints[index - 1], currentRoutePoints[index]);
+      lengths.push(length);
+      total += length;
+    }
+    return {lengths: lengths, total: total};
+  }
+
+  function stepIndexForPoint(pointIndex) {
+    var stepIndex = 0;
+    for (var index = 0; index < pointIndex; index += 1) {
+      stepIndex += Number(currentRoutePoints[index].floor) !==
+        Number(currentRoutePoints[index + 1].floor) ? 2 : 1;
+    }
+    return stepIndex;
+  }
+
+  function progressAtPoint(pointIndex) {
+    if (pointIndex <= 0 || currentRoutePoints.length < 2) {
+      return 0;
+    }
+    var metrics = routeMetrics();
+    if (!metrics.total) {
+      return 0;
+    }
+    var travelled = metrics.lengths.slice(0, pointIndex).reduce(function (sum, value) {
+      return sum + value;
+    }, 0);
+    return Math.min(1, travelled / metrics.total);
   }
 
   function routePosition(progress) {
@@ -129,33 +256,48 @@
       return null;
     }
     if (currentRoutePoints.length === 1) {
-      return {x: currentRoutePoints[0].x, y: currentRoutePoints[0].y, nodeIndex: 0};
+      return {
+        x: currentRoutePoints[0].x,
+        y: currentRoutePoints[0].y,
+        floor: currentRoutePoints[0].floor,
+        nodeIndex: 0,
+        stepIndex: 0,
+        transition: null
+      };
     }
 
-    var lengths = [];
-    var total = 0;
-    for (var index = 1; index < currentRoutePoints.length; index += 1) {
-      var previous = currentRoutePoints[index - 1];
-      var current = currentRoutePoints[index];
-      var length = Math.hypot(current.x - previous.x, current.y - previous.y);
-      lengths.push(length);
-      total += length;
-    }
-
-    var target = Math.max(0, Math.min(1, progress)) * total;
+    var metrics = routeMetrics();
+    var target = Math.max(0, Math.min(1, progress)) * metrics.total;
     var travelled = 0;
-    for (var segment = 0; segment < lengths.length; segment += 1) {
-      var nextTravelled = travelled + lengths[segment];
-      if (target <= nextTravelled || segment === lengths.length - 1) {
-        var ratio = lengths[segment] === 0
+    for (var segment = 0; segment < metrics.lengths.length; segment += 1) {
+      var nextTravelled = travelled + metrics.lengths[segment];
+      if (target <= nextTravelled || segment === metrics.lengths.length - 1) {
+        var ratio = metrics.lengths[segment] === 0
           ? 1
-          : (target - travelled) / lengths[segment];
+          : Math.max(0, Math.min(1, (target - travelled) / metrics.lengths[segment]));
         var start = currentRoutePoints[segment];
         var end = currentRoutePoints[segment + 1];
+        var changesFloor = Number(start.floor) !== Number(end.floor);
+        if (changesFloor) {
+          var onTargetFloor = ratio >= 0.5;
+          return {
+            x: onTargetFloor ? end.x : start.x,
+            y: onTargetFloor ? end.y : start.y,
+            floor: onTargetFloor ? end.floor : start.floor,
+            nodeIndex: ratio >= 0.98 ? segment + 1 : segment,
+            stepIndex: stepIndexForPoint(segment) + 1,
+            transition: {fromFloor: start.floor, toFloor: end.floor}
+          };
+        }
         return {
           x: start.x + (end.x - start.x) * ratio,
           y: start.y + (end.y - start.y) * ratio,
-          nodeIndex: ratio >= 0.98 ? segment + 1 : segment
+          floor: start.floor,
+          nodeIndex: ratio >= 0.98 ? segment + 1 : segment,
+          stepIndex: ratio >= 0.98
+            ? stepIndexForPoint(segment + 1)
+            : stepIndexForPoint(segment),
+          transition: null
         };
       }
       travelled = nextTravelled;
@@ -172,6 +314,15 @@
     if (!position) {
       return;
     }
+    showFloor(position.floor);
+    if (position.transition) {
+      showElevatorTransition(
+        position.transition.fromFloor,
+        position.transition.toFloor
+      );
+    } else {
+      hideElevatorTransition();
+    }
     elements.guideMarker.style.transform =
       "translate(" + position.x + "px, " + position.y + "px)";
     document.querySelectorAll(".map-node").forEach(function (node) {
@@ -186,7 +337,56 @@
         currentNode.classList.add("current");
       }
     }
-    markRouteProgress(position.nodeIndex, state);
+    markRouteProgress(position.stepIndex, state);
+  }
+
+  function cancelScreenContinuation() {
+    if (screenContinuationFrame !== null) {
+      window.cancelAnimationFrame(screenContinuationFrame);
+    }
+    screenContinuationFrame = null;
+    screenContinuationStarted = false;
+    hideElevatorTransition();
+  }
+
+  function beginScreenContinuation() {
+    var handoffIndex = currentRoutePoints.findIndex(function (point) {
+      return point.node_id === currentPhysicalHandoffNodeId;
+    });
+    if (handoffIndex < 0 || handoffIndex >= currentRoutePoints.length - 1) {
+      return;
+    }
+    var startProgress = progressAtPoint(handoffIndex);
+    var startedAt = null;
+    var duration = Math.max(5000, (currentRoutePoints.length - handoffIndex) * 1800);
+    screenContinuationStarted = true;
+    elements.routeNote.textContent =
+      "实体小车已在一楼3号电梯入口停车，后续乘梯和三楼路线正在由屏幕模拟。";
+    showToast("已到达电梯交接点，继续屏幕跨楼层导引。", false);
+    speak("实体小车已到达三号电梯入口。现在乘坐电梯前往三楼，后续路线由屏幕继续引导。");
+
+    function animate(timestamp) {
+      if (startedAt === null) {
+        startedAt = timestamp;
+      }
+      var ratio = Math.min(1, (timestamp - startedAt) / duration);
+      var progress = startProgress + (1 - startProgress) * ratio;
+      setGuideProgress(progress, ratio >= 1 ? "ARRIVED" : "MOVING");
+      if (ratio < 1) {
+        screenContinuationFrame = window.requestAnimationFrame(animate);
+      } else {
+        screenContinuationFrame = null;
+        guideInProgress = false;
+        hideElevatorTransition();
+        var arrivedAt = currentDestinationNames.length
+          ? currentDestinationNames[currentDestinationNames.length - 1]
+          : "目的地";
+        elements.robotState.textContent = "屏幕导引已到达";
+        speak("已经到达" + arrivedAt + "，请留意门牌和现场工作人员指引。");
+      }
+    }
+
+    screenContinuationFrame = window.requestAnimationFrame(animate);
   }
 
   function renderRoute(
@@ -195,9 +395,12 @@
     physicalAvailable,
     destinationNames,
     routePoints,
-    canGuide
+    canGuide,
+    physicalHandoffNodeId
   ) {
+    cancelScreenContinuation();
     currentRoute = route || [];
+    currentPhysicalHandoffNodeId = physicalHandoffNodeId || null;
     guideAvailable = Boolean(canGuide);
     guideInProgress = false;
     currentGuideProgress = 0;
@@ -221,20 +424,30 @@
     currentRoute.forEach(function (label, index) {
       var item = document.createElement("li");
       item.textContent = label;
+      if (label.indexOf("乘坐3号电梯") === 0) {
+        item.classList.add("elevator-step");
+      }
       if (index === 0) {
         item.classList.add("active");
       }
       elements.routeSteps.appendChild(item);
     });
+    renderMap(routePoints, destinationNames);
+    var floorText = currentFloorSequence.length > 1
+      ? "楼层顺序：" + currentFloorSequence.map(floorName).join(" → ") + "。"
+      : "当前路线位于" + floorName(currentFloorSequence[0] || 1) + "。";
     var simulation = currentMode === "simulation" || activeGuideRouteId === "SIMULATION";
     if (guideAvailable && simulation) {
-      elements.routeNote.textContent = "此路线支持屏幕模拟导引，点击按钮可查看图标沿实际路线移动。";
+      elements.routeNote.textContent =
+        floorText + "点击开始后，地图会在电梯处提示上下楼并自动切换楼层。";
+    } else if (physicalAvailable && currentPhysicalHandoffNodeId) {
+      elements.routeNote.textContent =
+        floorText + "实体小车只运行至一楼电梯入口，乘梯和三楼路线由屏幕继续模拟。";
     } else if (physicalAvailable) {
-      elements.routeNote.textContent = "此路线支持实体小车；地图进度为位置示意。";
+      elements.routeNote.textContent = floorText + "此路线支持实体小车；地图进度为位置示意。";
     } else {
-      elements.routeNote.textContent = "路线已正确显示，但实体小车尚未配置这条路线。";
+      elements.routeNote.textContent = floorText + "路线已正确显示，但实体小车尚未配置这条路线。";
     }
-    renderMap(routePoints, destinationNames);
     updateStartButton();
   }
 
@@ -251,7 +464,7 @@
         step.classList.add("active");
       });
     } else {
-      for (var index = 0; index <= reachedIndex; index += 1) {
+      for (var index = 0; index <= Math.min(reachedIndex, steps.length - 1); index += 1) {
         steps[index].classList.add("active");
       }
     }
@@ -282,7 +495,8 @@
         result.physical_available,
         result.destination_names,
         result.route_points,
-        result.guide_available
+        result.guide_available,
+        result.physical_handoff_node_id
       );
       speak(result.answer);
       if (result.intent === "help") {
@@ -314,6 +528,8 @@
       return;
     }
     try {
+      cancelScreenContinuation();
+      lastRobotState = null;
       var result = await robotCommand("start", {
         routeId: activeGuideRouteId,
         stepCount: Math.max(2, currentRoutePoints.length)
@@ -352,6 +568,10 @@
       }
       elements.robotDetail.textContent =
         details.join(" · ") || "系统已就绪，可以开始导引。";
+      if (screenContinuationFrame !== null) {
+        elements.robotState.textContent = "屏幕继续导引";
+        elements.robotDetail.textContent = "实体小车已在电梯入口停车，正在模拟跨楼层路线。";
+      }
       if (status.route_id === "CARDIOLOGY" && currentRoute.length === 0) {
         var restoredRoute = await api("/api/navigation/cardiology");
         activeGuideRouteId = restoredRoute.robot_route_id;
@@ -361,13 +581,18 @@
           restoredRoute.physical_available,
           [restoredRoute.destination_name],
           restoredRoute.points,
-          restoredRoute.physical_available
+          restoredRoute.physical_available,
+          restoredRoute.physical_handoff_node_id
         );
         guideInProgress = status.state !== "IDLE";
       }
 
       updateStartButton();
-      if (guideInProgress && currentRoutePoints.length) {
+      if (
+        guideInProgress &&
+        currentRoutePoints.length &&
+        screenContinuationFrame === null
+      ) {
         var now = Date.now();
         var progress = status.progress;
         if (progress === null || progress === undefined) {
@@ -380,7 +605,19 @@
             progress = currentGuideProgress;
           }
         }
-        setGuideProgress(progress, status.state);
+        var displayState = status.state;
+        if (currentMode === "hardware" && currentPhysicalHandoffNodeId) {
+          var handoffIndex = currentRoutePoints.findIndex(function (point) {
+            return point.node_id === currentPhysicalHandoffNodeId;
+          });
+          if (handoffIndex >= 0) {
+            progress *= progressAtPoint(handoffIndex);
+            if (status.state === "ARRIVED") {
+              displayState = "MOVING";
+            }
+          }
+        }
+        setGuideProgress(progress, displayState);
         lastProgressUpdateAt = now;
       }
       if (
@@ -388,10 +625,18 @@
         status.state === "ARRIVED" &&
         lastRobotState !== "ARRIVED"
       ) {
-        var arrivedAt = currentDestinationNames.length
-          ? currentDestinationNames[currentDestinationNames.length - 1]
-          : "目的地";
-        speak("已经到达" + arrivedAt + "，请留意门牌和现场工作人员指引。");
+        if (
+          currentMode === "hardware" &&
+          currentPhysicalHandoffNodeId &&
+          !screenContinuationStarted
+        ) {
+          beginScreenContinuation();
+        } else {
+          var arrivedAt = currentDestinationNames.length
+            ? currentDestinationNames[currentDestinationNames.length - 1]
+            : "目的地";
+          speak("已经到达" + arrivedAt + "，请留意门牌和现场工作人员指引。");
+        }
       }
       lastRobotState = status.state;
     } catch (error) {
@@ -448,6 +693,12 @@
     });
   });
 
+  elements.floorTabs.forEach(function (button) {
+    button.addEventListener("click", function () {
+      showFloor(button.getAttribute("data-floor"));
+    });
+  });
+
   elements.queryForm.addEventListener("submit", function (event) {
     event.preventDefault();
     submitQuery(elements.queryInput.value, false);
@@ -470,6 +721,7 @@
   document.getElementById("stop-button").addEventListener("click", function () {
     robotCommand("stop").then(function (result) {
       if (result.accepted) {
+        cancelScreenContinuation();
         guideInProgress = false;
       }
     }).catch(function (error) {
@@ -479,6 +731,7 @@
   document.getElementById("reset-button").addEventListener("click", function () {
     robotCommand("reset").then(function (result) {
       if (result.accepted) {
+        cancelScreenContinuation();
         guideInProgress = false;
         lastProgressUpdateAt = null;
         setGuideProgress(0, "IDLE");
