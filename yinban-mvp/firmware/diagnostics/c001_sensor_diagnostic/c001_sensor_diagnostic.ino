@@ -16,8 +16,10 @@ constexpr uint8_t kLine2 = 18;
 constexpr uint8_t kLine3 = 19;
 constexpr uint8_t kLine4 = 34;
 constexpr uint8_t kLine5 = 35;
-constexpr uint8_t kUltrasonicTrig = 32;
-constexpr uint8_t kUltrasonicEcho = 33;
+// The ESP32 example in the supplied C-001 courseware maps the dedicated
+// ultrasonic connector's A0/A1 labels to GPIO33/GPIO32 respectively.
+constexpr uint8_t kUltrasonicTrig = 33;
+constexpr uint8_t kUltrasonicEcho = 32;
 }  // namespace Pins
 
 constexpr unsigned long kReportIntervalMs = 250;

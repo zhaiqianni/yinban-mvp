@@ -34,12 +34,14 @@ class RobotController(Protocol):
 
 class SerialRobotLink:
     mode = "hardware"
+    heartbeat_interval_seconds = 0.5
 
     def __init__(self, port: str, baud: int = 115200) -> None:
         self.port = port
         self.baud = baud
         self._serial = None
         self._reader: threading.Thread | None = None
+        self._heartbeat: threading.Thread | None = None
         self._stop_reader = threading.Event()
         self._lock = threading.RLock()
         self._snapshot = RobotSnapshot(
@@ -64,17 +66,29 @@ class SerialRobotLink:
             )
             self._stop_reader.clear()
             self._reader = threading.Thread(target=self._read_loop, daemon=True)
+            self._heartbeat = threading.Thread(
+                target=self._heartbeat_loop,
+                daemon=True,
+            )
             self._reader.start()
-            self._write("PING")
+            self._heartbeat.start()
+            if not self._write("PING"):
+                raise ConnectionError("串口握手失败")
 
     def close(self) -> None:
         self._stop_reader.set()
         reader = self._reader
+        heartbeat = self._heartbeat
         if reader and reader.is_alive():
             reader.join(timeout=1)
+        if heartbeat and heartbeat.is_alive():
+            heartbeat.join(timeout=1)
         with self._lock:
             if self._serial:
-                self._serial.close()
+                try:
+                    self._serial.close()
+                except Exception:
+                    pass
             self._serial = None
 
     def start(self, route_id: str, step_count: int = 2) -> tuple[bool, str]:
@@ -100,6 +114,7 @@ class SerialRobotLink:
             return self._snapshot
 
     def _write(self, command: str, value: str | None = None) -> bool:
+        failure: Exception | None = None
         with self._lock:
             if not self._serial or not self._serial.is_open:
                 self._snapshot = RobotSnapshot(
@@ -114,19 +129,42 @@ class SerialRobotLink:
                 self._serial.write(encode_command(command, value))
                 return True
             except Exception as exc:
-                self._snapshot = RobotSnapshot(
-                    mode=self.mode,
-                    connected=False,
-                    state=RobotState.ERROR,
-                    error=f"串口写入失败：{exc}",
-                    updated_at=datetime.now(UTC),
-                )
-                return False
+                failure = exc
+        self._mark_disconnected(f"串口写入失败：{failure}")
+        return False
+
+    def _mark_disconnected(self, error: str) -> None:
+        connection = None
+        with self._lock:
+            connection = self._serial
+            self._serial = None
+            self._snapshot = RobotSnapshot(
+                mode=self.mode,
+                connected=False,
+                state=RobotState.ERROR,
+                error=error,
+                updated_at=datetime.now(UTC),
+            )
+            self._stop_reader.set()
+        if connection:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+    def _heartbeat_loop(self) -> None:
+        while not self._stop_reader.wait(self.heartbeat_interval_seconds):
+            if not self._write("PING"):
+                return
 
     def _read_loop(self) -> None:
         while not self._stop_reader.is_set():
             try:
-                raw = self._serial.readline()
+                with self._lock:
+                    connection = self._serial
+                if not connection or not connection.is_open:
+                    return
+                raw = connection.readline()
                 if not raw:
                     continue
                 event = parse_event(raw.decode("utf-8", errors="replace"))
@@ -144,14 +182,8 @@ class SerialRobotLink:
             except ValueError:
                 continue
             except Exception as exc:
-                with self._lock:
-                    self._snapshot = RobotSnapshot(
-                        mode=self.mode,
-                        connected=False,
-                        state=RobotState.ERROR,
-                        error=f"串口读取失败：{exc}",
-                        updated_at=datetime.now(UTC),
-                    )
+                if not self._stop_reader.is_set():
+                    self._mark_disconnected(f"串口读取失败：{exc}")
                 return
 
 
