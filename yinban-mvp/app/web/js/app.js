@@ -12,6 +12,7 @@
     robotState: document.getElementById("robot-state"),
     robotDetail: document.getElementById("robot-detail"),
     startButton: document.getElementById("start-button"),
+    resumeButton: document.getElementById("resume-button"),
     voiceButton: document.getElementById("voice-button"),
     voiceLabel: document.getElementById("voice-label"),
     queryInput: document.getElementById("query-input"),
@@ -46,6 +47,9 @@
   var lastElevatorTransitionKey = null;
   var screenContinuationFrame = null;
   var screenContinuationStarted = false;
+  var robotConnected = false;
+  var robotPollTimer = null;
+  var robotPollInFlight = false;
 
   var stateLabels = {
     IDLE: "等待任务",
@@ -57,12 +61,28 @@
   };
 
   async function api(path, options) {
-    var response = await fetch(path, options || {});
-    var payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.detail || "请求失败");
+    var controller = new AbortController();
+    var timeoutId = window.setTimeout(function () {
+      controller.abort();
+    }, 3000);
+    var requestOptions = Object.assign({}, options || {}, {
+      signal: controller.signal
+    });
+    try {
+      var response = await fetch(path, requestOptions);
+      var payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "请求失败");
+      }
+      return payload;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("请求超时，请检查后端服务。");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
     }
-    return payload;
   }
 
   function showToast(message, isError) {
@@ -87,9 +107,13 @@
   }
 
   function updateStartButton() {
-    elements.startButton.disabled = !guideAvailable;
+    var hardwareOffline = currentMode === "hardware" && !robotConnected;
+    elements.startButton.disabled = !guideAvailable || hardwareOffline;
+    elements.resumeButton.disabled = hardwareOffline;
     var simulation = currentMode === "simulation" || activeGuideRouteId === "SIMULATION";
-    if (guideAvailable && simulation) {
+    if (guideAvailable && hardwareOffline) {
+      elements.startButton.textContent = "等待机器人重连";
+    } else if (guideAvailable && simulation) {
       elements.startButton.textContent = "开始模拟导引";
     } else if (guideAvailable) {
       elements.startButton.textContent = "开始实体导引";
@@ -545,12 +569,28 @@
   }
 
   async function pollRobotStatus() {
+    if (robotPollInFlight) {
+      return;
+    }
+    robotPollInFlight = true;
+    var nextDelay = 500;
     try {
       var status = await api("/api/robot/status");
       currentMode = status.mode;
+      robotConnected = Boolean(status.connected);
       elements.connectionDot.classList.toggle("connected", status.connected);
       elements.modeLabel.textContent =
-        status.mode === "hardware" ? "真实硬件模式" : "模拟演示模式";
+        status.mode === "hardware"
+          ? (status.connected ? "真实硬件模式" : "真实硬件模式 · 正在重连")
+          : "模拟演示模式";
+      if (status.mode === "hardware" && !status.connected) {
+        elements.robotState.textContent = "机器人离线";
+        elements.robotDetail.textContent =
+          status.error || "蓝牙串口暂时不可用，系统正在自动重连。";
+        updateStartButton();
+        lastRobotState = status.state;
+        return;
+      }
       elements.robotState.textContent = stateLabels[status.state] || status.state;
       var details = [];
       if (status.route_id) {
@@ -640,10 +680,17 @@
       }
       lastRobotState = status.state;
     } catch (error) {
+      nextDelay = 2000;
+      robotConnected = false;
       elements.connectionDot.classList.remove("connected");
       elements.modeLabel.textContent = "后端连接失败";
       elements.robotState.textContent = "系统离线";
       elements.robotDetail.textContent = "请确认银伴服务已经启动。";
+      updateStartButton();
+    } finally {
+      robotPollInFlight = false;
+      window.clearTimeout(robotPollTimer);
+      robotPollTimer = window.setTimeout(pollRobotStatus, nextDelay);
     }
   }
 
@@ -744,5 +791,4 @@
 
   setupSpeechRecognition();
   pollRobotStatus();
-  window.setInterval(pollRobotStatus, 500);
 })();
