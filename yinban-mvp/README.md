@@ -29,11 +29,17 @@
 
     http://127.0.0.1:8000
 
+启动脚本默认监听局域网地址，并会在窗口中显示供其他电脑访问的网址。另一台电脑必须与运行银伴服务的电脑处于同一局域网，然后打开类似下面的地址：
+
+    http://100.71.120.221:8000
+
+其中 IP 地址以启动窗口实际显示为准。不要在公共网络上转发或暴露 8000 端口。
+
 也可以手动运行：
 
     python -m venv .venv
     .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-    .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+    .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## 运行测试
 

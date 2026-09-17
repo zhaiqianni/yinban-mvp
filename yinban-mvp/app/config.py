@@ -15,7 +15,7 @@ class Settings:
     mode: str = "simulation"
     robot_port: str = ""
     robot_baud: int = 115200
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"
     port: int = 8000
 
     @classmethod
@@ -27,7 +27,6 @@ class Settings:
             mode=mode,
             robot_port=os.getenv("YINBAN_ROBOT_PORT", "").strip(),
             robot_baud=int(os.getenv("YINBAN_ROBOT_BAUD", "115200")),
-            host=os.getenv("YINBAN_HOST", "127.0.0.1"),
+            host=os.getenv("YINBAN_HOST", "0.0.0.0").strip() or "0.0.0.0",
             port=int(os.getenv("YINBAN_PORT", "8000")),
         )
-
