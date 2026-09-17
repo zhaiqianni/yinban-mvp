@@ -1,19 +1,13 @@
-// Yinban C-001 competition firmware.
+// Yinban C-001 multi-route competition firmware.
 //
-// Verified hardware:
-//   - Five-way line sensor on GPIO 13, 18, 19, 34, 35.
-//   - Left motor forward/reverse on GPIO 17/16.
-//   - Right motor forward/reverse on GPIO 26/27.
-//   - Local stop button on GPIO 25.
-//   - HS-SR04-L ultrasonic Trig/Echo on GPIO 33/32.
+// Verified pins:
+//   line sensors 13/18/19/34/35, left motor 17/16, right motor 26/27,
+//   local stop button 25, HS-SR04-L Trig/Echo 33/32.
 //
-// Safety rules:
-//   - Power-up and reset always leave the motors stopped.
-//   - Only START:CARDIOLOGY may begin a run.
-//   - STOP, the local button, line loss, route timeout, and sensor failure stop
-//     both motors locally without waiting for the computer.
-//   - An obstacle stop is latched. Removing the obstacle never restarts the
-//     vehicle; RESUME is required after the clearance has been confirmed.
+// The computer sends a validated route action queue. The car never resumes
+// after power loss, Bluetooth reconnect, manual stop, line loss, or a turn
+// timeout. RESET is an explicit confirmation that the car was manually placed
+// at the fixed lobby start with its nose pointing toward elevator 3.
 
 #include <Arduino.h>
 #include "BluetoothSerial.h"
@@ -49,6 +43,7 @@ constexpr bool kOut1IsPhysicalLeft = true;
 constexpr int kBaseDuty = 90;
 constexpr int kMinimumDuty = 35;
 constexpr int kMaximumDuty = 130;
+constexpr int kTurnDuty = 78;
 constexpr float kProportionalGain = 18.0F;
 constexpr float kDerivativeGain = 14.0F;
 
@@ -60,36 +55,62 @@ constexpr uint8_t kNoEchoStopCount = 5;
 constexpr unsigned long kEchoTimeoutUs = 25000;
 constexpr unsigned long kUltrasonicIntervalMs = 60;
 
+constexpr uint8_t kMaximumActions = 8;
+constexpr unsigned long kNodeConfirmMs = 30;
+constexpr unsigned long kLineStableMs = 35;
 constexpr unsigned long kLineLostStopMs = 150;
-constexpr unsigned long kFinishConfirmMs = 150;
+constexpr unsigned long kStraightCrossMs = 240;
+constexpr unsigned long kTurnAdvanceMs = 125;
+constexpr unsigned long kTurnMinimumMs = 190;
+constexpr unsigned long kTurnTimeoutMs = 1500;
+constexpr unsigned long kUTurnMinimumMs = 430;
+constexpr unsigned long kUTurnTimeoutMs = 2300;
 constexpr unsigned long kMaximumRouteRuntimeMs = 60000;
 constexpr unsigned long kButtonDebounceMs = 40;
 constexpr unsigned long kCommunicationTimeoutMs = 1500;
 
 enum class RobotState {
+  NeedsReset,
   Idle,
   Moving,
+  Turning,
   Blocked,
   LineLost,
   Arrived,
   Error,
 };
 
-RobotState robotState = RobotState::Idle;
-String activeRoute;
+enum class Maneuver { None, Straight, Left, Right, UTurn };
+
+RobotState robotState = RobotState::NeedsReset;
+RobotState stateBeforeBlocked = RobotState::Moving;
+Maneuver maneuver = Maneuver::None;
+String activeMission;
+String activeBaseRoute;
 String usbBuffer;
 String bluetoothBuffer;
+char routeActions[kMaximumActions];
+uint8_t actionCount = 0;
+uint8_t actionIndex = 0;
+uint8_t nodeCount = 0;
 
 float previousLineError = 0.0F;
 float lastDistanceCm = -1.0F;
 unsigned long routeStartedMs = 0;
 unsigned long lineLostStartedMs = 0;
-unsigned long finishStartedMs = 0;
+unsigned long nodeStartedMs = 0;
+unsigned long normalLineStartedMs = 0;
+unsigned long maneuverStartedMs = 0;
+unsigned long turnLineStartedMs = 0;
 unsigned long lastUltrasonicMs = 0;
 unsigned long buttonChangedMs = 0;
 unsigned long lastControlMessageMs = 0;
 bool rawButtonPressed = false;
 bool stableButtonPressed = false;
+bool homeReady = false;
+bool nodeArmed = true;
+bool turnSawClear = false;
+bool hadBluetoothClient = false;
 uint8_t obstacleCount = 0;
 uint8_t clearCount = 0;
 uint8_t noEchoCount = 0;
@@ -119,40 +140,62 @@ void drive(int left, int right) {
   writeMotor(Pwm::kRightForwardChannel, Pwm::kRightReverseChannel, right);
 }
 
-void stopMotors() {
-  drive(0, 0);
-}
+void stopMotors() { drive(0, 0); }
 
 void reportEvent(const String& event) {
   Serial.println(event);
   SerialBT.println(event);
 }
 
+void clearMission() {
+  activeMission = "";
+  activeBaseRoute = "";
+  actionCount = 0;
+  actionIndex = 0;
+  nodeCount = 0;
+  maneuver = Maneuver::None;
+}
+
 void resetRunTracking() {
   previousLineError = 0.0F;
   lineLostStartedMs = 0;
-  finishStartedMs = 0;
+  nodeStartedMs = 0;
+  normalLineStartedMs = 0;
+  maneuverStartedMs = 0;
+  turnLineStartedMs = 0;
   lastUltrasonicMs = 0;
   obstacleCount = 0;
   clearCount = 0;
   noEchoCount = 0;
   lastDistanceCm = -1.0F;
+  nodeArmed = true;
+  turnSawClear = false;
 }
 
-void enterIdle(bool clearRoute = false) {
+void enterNeedsReset() {
+  stopMotors();
+  robotState = RobotState::NeedsReset;
+  homeReady = false;
+  routeStartedMs = 0;
+  clearMission();
+  resetRunTracking();
+  reportEvent("NEEDS_RESET");
+}
+
+void confirmHome() {
   stopMotors();
   robotState = RobotState::Idle;
+  homeReady = true;
   routeStartedMs = 0;
+  clearMission();
   resetRunTracking();
-  if (clearRoute) {
-    activeRoute = "";
-  }
-  reportEvent("READY");
+  reportEvent("HOME_READY");
 }
 
 void enterError(const String& reason) {
   stopMotors();
   robotState = RobotState::Error;
+  homeReady = false;
   reportEvent("ERROR:" + reason);
 }
 
@@ -161,32 +204,15 @@ bool sensorOnBlack(uint8_t pin) {
   return kBlackIsLow ? !isHigh : isHigh;
 }
 
-float readDistanceCm() {
-  digitalWrite(Pins::kUltrasonicTrig, LOW);
-  delayMicroseconds(2);
-  digitalWrite(Pins::kUltrasonicTrig, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(Pins::kUltrasonicTrig, LOW);
-
-  const unsigned long durationUs =
-      pulseIn(Pins::kUltrasonicEcho, HIGH, kEchoTimeoutUs);
-  if (durationUs == 0) {
-    return -1.0F;
-  }
-  return static_cast<float>(durationUs) / 58.0F;
-}
-
 void readLine(bool line[5], int& activeCount, int& weightedSum) {
   static const int weights[5] = {-2, -1, 0, 1, 2};
   activeCount = 0;
   weightedSum = 0;
-
   for (uint8_t index = 0; index < 5; ++index) {
     const uint8_t physicalIndex =
         kOut1IsPhysicalLeft ? index : static_cast<uint8_t>(4 - index);
     line[physicalIndex] = sensorOnBlack(Pins::kLine[index]);
   }
-
   for (uint8_t index = 0; index < 5; ++index) {
     if (line[index]) {
       ++activeCount;
@@ -195,50 +221,209 @@ void readLine(bool line[5], int& activeCount, int& weightedSum) {
   }
 }
 
-void startRoute(const String& route) {
-  if (route != "CARDIOLOGY") {
-    reportEvent("ERROR:UNSUPPORTED_ROUTE");
-    return;
-  }
+float readDistanceCm() {
+  digitalWrite(Pins::kUltrasonicTrig, LOW);
+  delayMicroseconds(2);
+  digitalWrite(Pins::kUltrasonicTrig, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(Pins::kUltrasonicTrig, LOW);
+  const unsigned long durationUs =
+      pulseIn(Pins::kUltrasonicEcho, HIGH, kEchoTimeoutUs);
+  return durationUs == 0 ? -1.0F : static_cast<float>(durationUs) / 58.0F;
+}
 
+bool isAllowedAction(char action) {
+  return action == 'S' || action == 'L' || action == 'R' ||
+         action == 'U' || action == 'X';
+}
+
+bool missionMatches(const String& mission, const String& actions) {
+  return (mission == "CARDIOLOGY" && actions == "S,X") ||
+         (mission == "TOILET" && actions == "R,X") ||
+         (mission == "PHARMACY" && actions == "S,R,X") ||
+         (mission == "RETURN_CARDIOLOGY" && actions == "U,S,X") ||
+         (mission == "RETURN_TOILET" && actions == "U,L,X") ||
+         (mission == "RETURN_PHARMACY" && actions == "U,L,S,X");
+}
+
+bool parseActions(const String& actionText) {
+  actionCount = 0;
+  if (actionText.length() == 0 || actionText.endsWith(",")) {
+    return false;
+  }
+  int start = 0;
+  while (start < actionText.length()) {
+    const int comma = actionText.indexOf(',', start);
+    const int end = comma < 0 ? actionText.length() : comma;
+    if (end - start != 1 || actionCount >= kMaximumActions) {
+      return false;
+    }
+    const char action = actionText.charAt(start);
+    if (!isAllowedAction(action)) {
+      return false;
+    }
+    routeActions[actionCount++] = action;
+    if (comma < 0) {
+      break;
+    }
+    start = comma + 1;
+  }
+  if (actionCount == 0 || routeActions[actionCount - 1] != 'X') {
+    return false;
+  }
+  for (uint8_t index = 0; index + 1 < actionCount; ++index) {
+    if (routeActions[index] == 'X') {
+      return false;
+    }
+    if (routeActions[index] == 'U' && index != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+String baseRouteFor(const String& mission) {
+  return mission.startsWith("RETURN_") ? mission.substring(7) : mission;
+}
+
+void reportMoving() { reportEvent("MOVING:" + activeMission); }
+
+void beginManeuver(Maneuver next) {
+  maneuver = next;
+  maneuverStartedMs = millis();
+  turnLineStartedMs = 0;
+  turnSawClear = false;
+  nodeArmed = false;
+  robotState = next == Maneuver::Straight ? RobotState::Moving
+                                          : RobotState::Turning;
+  if (next == Maneuver::Left) {
+    reportEvent("TURNING:LEFT");
+  } else if (next == Maneuver::Right) {
+    reportEvent("TURNING:RIGHT");
+  } else if (next == Maneuver::UTurn) {
+    reportEvent("TURNING:UTURN");
+  } else {
+    reportEvent("TURNING:STRAIGHT");
+  }
+}
+
+bool linePresentAtStart() {
   bool line[5];
   int activeCount = 0;
   int weightedSum = 0;
   readLine(line, activeCount, weightedSum);
-  if (activeCount == 0) {
-    stopMotors();
+  return activeCount > 0;
+}
+
+void startMission(const String& mission, const String& actionText) {
+  const bool isReturn = mission.startsWith("RETURN_");
+  const String baseRoute = baseRouteFor(mission);
+  if (!missionMatches(mission, actionText) || !parseActions(actionText)) {
+    enterError("INVALID_ROUTE");
+    return;
+  }
+  if ((!isReturn && (robotState != RobotState::Idle || !homeReady)) ||
+      (isReturn && (robotState != RobotState::Arrived ||
+                    activeBaseRoute != baseRoute))) {
+    enterError("POSITION_MISMATCH");
+    return;
+  }
+  if (!linePresentAtStart()) {
     robotState = RobotState::LineLost;
+    homeReady = false;
     reportEvent("LINE_LOST");
     return;
   }
-
   const float distanceCm = readDistanceCm();
   lastDistanceCm = distanceCm;
   if (distanceCm > 0.0F && distanceCm < kObstacleStopCm) {
-    stopMotors();
-    activeRoute = route;
-    robotState = RobotState::Blocked;
-    obstacleCount = kObstacleConfirmCount;
-    clearCount = 0;
-    reportEvent("BLOCKED:" + String(distanceCm, 1));
+    enterError("START_BLOCKED");
     return;
   }
 
-  activeRoute = route;
+  activeMission = mission;
+  activeBaseRoute = baseRoute;
+  actionIndex = 0;
+  nodeCount = 0;
+  homeReady = false;
   resetRunTracking();
-  robotState = RobotState::Moving;
+  // Ignore the start/arrival marker under the sensors. The first route action
+  // belongs to the next junction after normal line has been reacquired.
+  nodeArmed = false;
   routeStartedMs = millis();
   lastControlMessageMs = routeStartedMs;
-  reportEvent("MOVING");
+  robotState = RobotState::Moving;
+  reportMoving();
+  if (routeActions[0] == 'U') {
+    beginManeuver(Maneuver::UTurn);
+  }
+}
+
+void finishMission() {
+  stopMotors();
+  const String completedMission = activeMission;
+  reportEvent("ARRIVED:" + completedMission);
+  if (completedMission.startsWith("RETURN_")) {
+    robotState = RobotState::Idle;
+    homeReady = true;
+    clearMission();
+    reportEvent("HOME_READY");
+  } else {
+    robotState = RobotState::Arrived;
+    homeReady = false;
+  }
+}
+
+void executeNodeAction() {
+  if (actionIndex >= actionCount) {
+    enterError("ACTION_UNDERFLOW");
+    return;
+  }
+  const char action = routeActions[actionIndex];
+  ++nodeCount;
+  reportEvent("NODE:" + activeMission + ":" + String(nodeCount));
+  if (action == 'X') {
+    ++actionIndex;
+    finishMission();
+  } else if (action == 'S') {
+    beginManeuver(Maneuver::Straight);
+  } else if (action == 'L') {
+    beginManeuver(Maneuver::Left);
+  } else if (action == 'R') {
+    beginManeuver(Maneuver::Right);
+  } else {
+    enterError("UNEXPECTED_ACTION");
+  }
+}
+
+void finishManeuver() {
+  ++actionIndex;
+  maneuver = Maneuver::None;
+  maneuverStartedMs = 0;
+  turnLineStartedMs = 0;
+  normalLineStartedMs = 0;
+  lineLostStartedMs = 0;
+  previousLineError = 0.0F;
+  nodeArmed = false;
+  robotState = RobotState::Moving;
+  reportMoving();
 }
 
 void reportCurrentState() {
   switch (robotState) {
+    case RobotState::NeedsReset:
+      reportEvent("NEEDS_RESET");
+      break;
     case RobotState::Idle:
-      reportEvent("READY");
+      reportEvent(homeReady ? "HOME_READY" : "NEEDS_RESET");
       break;
     case RobotState::Moving:
-      reportEvent("MOVING");
+      reportMoving();
+      break;
+    case RobotState::Turning:
+      reportEvent(maneuver == Maneuver::Left ? "TURNING:LEFT" :
+                  maneuver == Maneuver::Right ? "TURNING:RIGHT" :
+                  "TURNING:UTURN");
       break;
     case RobotState::Blocked:
       reportEvent("BLOCKED:" + String(max(lastDistanceCm, 0.0F), 1));
@@ -247,7 +432,7 @@ void reportCurrentState() {
       reportEvent("LINE_LOST");
       break;
     case RobotState::Arrived:
-      reportEvent("ARRIVED:" + activeRoute);
+      reportEvent("ARRIVED:" + activeMission);
       break;
     case RobotState::Error:
       reportEvent("ERROR:STOPPED");
@@ -261,49 +446,54 @@ void handleCommand(String command) {
   if (command.length() == 0) {
     return;
   }
-
   if (command == "PING") {
     lastControlMessageMs = millis();
     reportCurrentState();
     return;
   }
-  if (command == "STOP") {
-    lastControlMessageMs = millis();
-    enterIdle(false);
-    return;
-  }
   if (command == "RESET") {
     lastControlMessageMs = millis();
-    enterIdle(true);
+    confirmHome();
+    return;
+  }
+  if (command == "STOP") {
+    lastControlMessageMs = millis();
+    if (robotState == RobotState::Moving || robotState == RobotState::Turning ||
+        robotState == RobotState::Blocked) {
+      enterNeedsReset();
+    } else {
+      stopMotors();
+      reportCurrentState();
+    }
     return;
   }
   if (command == "RESUME") {
     lastControlMessageMs = millis();
-    if (robotState != RobotState::Blocked) {
-      reportEvent("ERROR:RESUME_NOT_ALLOWED");
+    if (robotState != RobotState::Blocked || clearCount < kClearConfirmCount) {
+      reportEvent(robotState == RobotState::Blocked
+                      ? "BLOCKED:" + String(max(lastDistanceCm, 0.0F), 1)
+                      : "ERROR:RESUME_NOT_ALLOWED");
       return;
     }
-    if (clearCount < kClearConfirmCount) {
-      reportEvent("BLOCKED:" + String(max(lastDistanceCm, 0.0F), 1));
-      return;
-    }
-
-    resetRunTracking();
-    robotState = RobotState::Moving;
-    routeStartedMs = millis();
-    lastControlMessageMs = routeStartedMs;
-    reportEvent("MOVING");
+    robotState = stateBeforeBlocked;
+    obstacleCount = 0;
+    clearCount = 0;
+    noEchoCount = 0;
+    reportCurrentState();
     return;
   }
-  if (command.startsWith("START:")) {
+  if (command.startsWith("RUN:")) {
     lastControlMessageMs = millis();
-    startRoute(command.substring(6));
+    const int separator = command.indexOf(':', 4);
+    if (separator < 0) {
+      enterError("INVALID_ROUTE");
+      return;
+    }
+    startMission(command.substring(4, separator),
+                 command.substring(separator + 1));
     return;
   }
-
-  stopMotors();
-  robotState = RobotState::Error;
-  reportEvent("ERROR:UNKNOWN_COMMAND");
+  enterError("UNKNOWN_COMMAND");
 }
 
 void readCommands(Stream& stream, String& buffer) {
@@ -314,13 +504,11 @@ void readCommands(Stream& stream, String& buffer) {
         handleCommand(buffer);
         buffer = "";
       }
-    } else if (buffer.length() < 80) {
+    } else if (buffer.length() < 96) {
       buffer += current;
     } else {
       buffer = "";
-      stopMotors();
-      robotState = RobotState::Error;
-      reportEvent("ERROR:COMMAND_TOO_LONG");
+      enterError("COMMAND_TOO_LONG");
     }
   }
 }
@@ -332,48 +520,58 @@ void updateButton() {
     rawButtonPressed = pressed;
     buttonChangedMs = now;
   }
-
   if (now - buttonChangedMs < kButtonDebounceMs ||
       stableButtonPressed == rawButtonPressed) {
     return;
   }
-
   stableButtonPressed = rawButtonPressed;
-  if (stableButtonPressed) {
-    enterIdle(false);
+  if (stableButtonPressed &&
+      (robotState == RobotState::Moving || robotState == RobotState::Turning ||
+       robotState == RobotState::Blocked)) {
+    enterNeedsReset();
   }
 }
 
+bool isActiveMotionState() {
+  return robotState == RobotState::Moving ||
+         robotState == RobotState::Turning;
+}
+
+void updateBluetoothConnection() {
+  const bool hasClient = SerialBT.hasClient();
+  if (hadBluetoothClient && !hasClient &&
+      (isActiveMotionState() || robotState == RobotState::Blocked)) {
+    enterError("COMMUNICATION_LOST");
+  }
+  hadBluetoothClient = hasClient;
+}
+
 void updateUltrasonic() {
-  if (robotState != RobotState::Moving &&
-      robotState != RobotState::Blocked) {
+  if (!isActiveMotionState() && robotState != RobotState::Blocked) {
     return;
   }
-
   const unsigned long now = millis();
   if (now - lastUltrasonicMs < kUltrasonicIntervalMs) {
     return;
   }
   lastUltrasonicMs = now;
-
   lastDistanceCm = readDistanceCm();
   if (lastDistanceCm < 0.0F) {
     clearCount = 0;
     obstacleCount = 0;
-    if (robotState == RobotState::Moving &&
-        ++noEchoCount >= kNoEchoStopCount) {
+    if (isActiveMotionState() && ++noEchoCount >= kNoEchoStopCount) {
       enterError("ULTRASONIC_NO_ECHO");
     }
     return;
   }
   noEchoCount = 0;
-
-  if (robotState == RobotState::Moving) {
+  if (isActiveMotionState()) {
     if (lastDistanceCm < kObstacleStopCm) {
       if (obstacleCount < kObstacleConfirmCount) {
         ++obstacleCount;
       }
       if (obstacleCount >= kObstacleConfirmCount) {
+        stateBeforeBlocked = robotState;
         stopMotors();
         robotState = RobotState::Blocked;
         clearCount = 0;
@@ -384,7 +582,6 @@ void updateUltrasonic() {
     }
     return;
   }
-
   if (lastDistanceCm >= kObstacleClearCm) {
     if (clearCount < kClearConfirmCount) {
       ++clearCount;
@@ -394,63 +591,126 @@ void updateUltrasonic() {
   }
 }
 
-void updateLineFollowing() {
-  if (robotState != RobotState::Moving) {
+void driveLine(int activeCount, int weightedSum) {
+  const float error = static_cast<float>(weightedSum) / activeCount;
+  const float correction =
+      kProportionalGain * error +
+      kDerivativeGain * (error - previousLineError);
+  previousLineError = error;
+  const int left = constrain(static_cast<int>(kBaseDuty + correction),
+                             kMinimumDuty, kMaximumDuty);
+  const int right = constrain(static_cast<int>(kBaseDuty - correction),
+                              kMinimumDuty, kMaximumDuty);
+  drive(left, right);
+}
+
+void updateManeuver(const bool line[5], int activeCount) {
+  const unsigned long now = millis();
+  const unsigned long elapsed = now - maneuverStartedMs;
+  if (maneuver == Maneuver::Straight) {
+    drive(kBaseDuty, kBaseDuty);
+    if (elapsed >= kStraightCrossMs && activeCount <= 3) {
+      finishManeuver();
+    } else if (elapsed >= kTurnTimeoutMs) {
+      enterError("JUNCTION_TIMEOUT");
+    }
     return;
   }
 
+  if (maneuver == Maneuver::Left) {
+    if (elapsed < kTurnAdvanceMs) {
+      drive(kBaseDuty, kBaseDuty);
+    } else {
+      drive(-kTurnDuty, kTurnDuty);
+    }
+  } else {
+    if (maneuver == Maneuver::Right && elapsed < kTurnAdvanceMs) {
+      drive(kBaseDuty, kBaseDuty);
+    } else {
+      drive(kTurnDuty, -kTurnDuty);
+    }
+  }
+
+  if (activeCount <= 2) {
+    turnSawClear = true;
+  }
+  const unsigned long minimum =
+      maneuver == Maneuver::UTurn ? kUTurnMinimumMs : kTurnMinimumMs;
+  const unsigned long timeout =
+      maneuver == Maneuver::UTurn ? kUTurnTimeoutMs : kTurnTimeoutMs;
+  if (turnSawClear && elapsed >= minimum && line[2] && activeCount <= 3) {
+    if (turnLineStartedMs == 0) {
+      turnLineStartedMs = now;
+    } else if (now - turnLineStartedMs >= kLineStableMs) {
+      finishManeuver();
+    }
+  } else {
+    turnLineStartedMs = 0;
+  }
+  if (elapsed >= timeout) {
+    enterError(maneuver == Maneuver::UTurn ? "UTURN_TIMEOUT"
+                                           : "JUNCTION_TIMEOUT");
+  }
+}
+
+void updateLineControl() {
+  if (!isActiveMotionState()) {
+    return;
+  }
   const unsigned long now = millis();
   bool line[5];
   int activeCount = 0;
   int weightedSum = 0;
   readLine(line, activeCount, weightedSum);
 
-  if (activeCount == 5) {
-    stopMotors();
-    lineLostStartedMs = 0;
-    if (finishStartedMs == 0) {
-      finishStartedMs = now;
-    } else if (now - finishStartedMs >= kFinishConfirmMs) {
-      robotState = RobotState::Arrived;
-      reportEvent("ARRIVED:" + activeRoute);
-    }
+  if (maneuver != Maneuver::None) {
+    updateManeuver(line, activeCount);
     return;
   }
-  finishStartedMs = 0;
-
   if (activeCount == 0) {
     stopMotors();
     if (lineLostStartedMs == 0) {
       lineLostStartedMs = now;
     } else if (now - lineLostStartedMs >= kLineLostStopMs) {
       robotState = RobotState::LineLost;
+      homeReady = false;
       reportEvent("LINE_LOST");
     }
     return;
   }
-
   lineLostStartedMs = 0;
-  const float error = static_cast<float>(weightedSum) / activeCount;
-  const float correction =
-      kProportionalGain * error +
-      kDerivativeGain * (error - previousLineError);
-  previousLineError = error;
 
-  const int left = constrain(
-      static_cast<int>(kBaseDuty + correction),
-      kMinimumDuty,
-      kMaximumDuty);
-  const int right = constrain(
-      static_cast<int>(kBaseDuty - correction),
-      kMinimumDuty,
-      kMaximumDuty);
-  drive(left, right);
+  if (!nodeArmed) {
+    if (activeCount <= 3) {
+      if (normalLineStartedMs == 0) {
+        normalLineStartedMs = now;
+      } else if (now - normalLineStartedMs >= kLineStableMs) {
+        nodeArmed = true;
+      }
+    } else {
+      normalLineStartedMs = 0;
+    }
+    driveLine(activeCount, weightedSum);
+    return;
+  }
+
+  if (activeCount >= 4) {
+    stopMotors();
+    if (nodeStartedMs == 0) {
+      nodeStartedMs = now;
+    } else if (now - nodeStartedMs >= kNodeConfirmMs) {
+      nodeStartedMs = 0;
+      executeNodeAction();
+    }
+    return;
+  }
+  nodeStartedMs = 0;
+  driveLine(activeCount, weightedSum);
 }
 
 void setup() {
   Serial.begin(115200);
   SerialBT.begin("YINBAN_ROBOT");
-
   for (uint8_t pin : Pins::kLine) {
     pinMode(pin, INPUT);
   }
@@ -458,39 +718,37 @@ void setup() {
   pinMode(Pins::kUltrasonicTrig, OUTPUT);
   pinMode(Pins::kUltrasonicEcho, INPUT);
   digitalWrite(Pins::kUltrasonicTrig, LOW);
-
   setupPwm(Pins::kLeftForward, Pwm::kLeftForwardChannel);
   setupPwm(Pins::kLeftReverse, Pwm::kLeftReverseChannel);
   setupPwm(Pins::kRightReverse, Pwm::kRightReverseChannel);
   setupPwm(Pins::kRightForward, Pwm::kRightForwardChannel);
   stopMotors();
-
   rawButtonPressed = digitalRead(Pins::kStopButton) == LOW;
   stableButtonPressed = rawButtonPressed;
   buttonChangedMs = millis();
   delay(250);
-  reportEvent("READY");
+  hadBluetoothClient = SerialBT.hasClient();
+  reportEvent("NEEDS_RESET");
 }
 
 void loop() {
   readCommands(Serial, usbBuffer);
   readCommands(SerialBT, bluetoothBuffer);
+  updateBluetoothConnection();
   updateButton();
 
-  if (robotState == RobotState::Moving &&
+  if (isActiveMotionState() &&
       millis() - routeStartedMs >= kMaximumRouteRuntimeMs) {
     enterError("ROUTE_TIMEOUT");
   }
-
-  if (robotState == RobotState::Moving &&
+  if ((isActiveMotionState() || robotState == RobotState::Blocked) &&
       millis() - lastControlMessageMs >= kCommunicationTimeoutMs) {
     enterError("COMMUNICATION_TIMEOUT");
   }
 
   updateUltrasonic();
-  updateLineFollowing();
-
-  if (robotState != RobotState::Moving) {
+  updateLineControl();
+  if (!isActiveMotionState()) {
     stopMotors();
   }
   delay(2);

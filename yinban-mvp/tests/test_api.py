@@ -5,6 +5,14 @@ from app.main import create_app
 from app.services.mock_robot import MockRobot
 
 
+class Clock:
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def __call__(self) -> float:
+        return self.value
+
+
 def test_health_and_dialogue_api() -> None:
     app = create_app(Settings(mode="simulation"), MockRobot())
     with TestClient(app) as client:
@@ -63,6 +71,8 @@ def test_robot_start_and_status_api() -> None:
         status = client.get("/api/robot/status").json()
         assert status["mode"] == "simulation"
         assert status["state"] == "MOVING"
+        assert status["mission_direction"] == "outbound"
+        assert status["location_id"] is None
         assert 0 <= status["progress"] < 0.01
 
 
@@ -118,11 +128,36 @@ def test_dialogue_api_returns_cross_floor_round_trip() -> None:
         assert payload["guide_available"] is True
 
 
-def test_display_only_route_cannot_start_robot() -> None:
+def test_pharmacy_has_a_physical_route() -> None:
     app = create_app(Settings(mode="simulation"), MockRobot())
     with TestClient(app) as client:
+        dialogue = client.post(
+            "/api/dialogue", json={"text": "我要去药房"}
+        ).json()
+        assert dialogue["robot_route_id"] == "PHARMACY"
+        assert dialogue["physical_available"] is True
         response = client.post(
             "/api/robot/start",
             json={"routeId": "PHARMACY"},
         )
-        assert response.json()["accepted"] is False
+        assert response.json()["accepted"] is True
+
+
+def test_robot_return_api_requires_matching_arrival() -> None:
+    clock = Clock()
+    robot = MockRobot(clock)
+    app = create_app(Settings(mode="simulation"), robot)
+    with TestClient(app) as client:
+        assert client.post(
+            "/api/robot/return", json={"routeId": "PHARMACY"}
+        ).json()["accepted"] is False
+        assert client.post(
+            "/api/robot/start", json={"routeId": "PHARMACY"}
+        ).json()["accepted"] is True
+        clock.value = 9.0
+        status = client.get("/api/robot/status").json()
+        assert status["state"] == "ARRIVED"
+        assert status["return_route_id"] == "PHARMACY"
+        assert client.post(
+            "/api/robot/return", json={"routeId": "PHARMACY"}
+        ).json()["accepted"] is True

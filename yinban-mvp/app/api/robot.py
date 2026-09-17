@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 
 from app.models.schemas import (
     CommandResponse,
+    RobotReturnRequest,
     RobotStartRequest,
     RobotStatusResponse,
 )
@@ -23,6 +24,17 @@ def start(payload: RobotStartRequest, request: Request) -> CommandResponse:
     return _command_response(
         robot,
         robot.start(payload.route_id.upper(), payload.step_count),
+    )
+
+
+@router.post("/return", response_model=CommandResponse)
+def return_to_start(
+    payload: RobotReturnRequest, request: Request
+) -> CommandResponse:
+    robot = request.app.state.runtime.robot
+    return _command_response(
+        robot,
+        robot.return_to_start(payload.route_id.upper()),
     )
 
 
@@ -55,5 +67,10 @@ def status(request: Request) -> RobotStatusResponse:
         distance_cm=snapshot.distance_cm,
         error=snapshot.error,
         progress=snapshot.progress,
+        mission_direction=snapshot.mission_direction,
+        node_index=snapshot.node_index,
+        location_id=snapshot.location_id,
+        needs_reset=snapshot.needs_reset,
+        return_route_id=snapshot.return_route_id,
         updated_at=snapshot.updated_at,
     )

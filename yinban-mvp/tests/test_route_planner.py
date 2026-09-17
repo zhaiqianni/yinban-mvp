@@ -24,7 +24,7 @@ def test_cardiology_has_physical_route() -> None:
     assert route.physical_available is True
 
 
-def test_pharmacy_is_display_only() -> None:
+def test_pharmacy_has_physical_route() -> None:
     route = build_planner().plan("pharmacy")
     assert route.labels == ["门诊大厅（一楼）", "3号电梯口（一楼）", "药房（一楼）"]
     assert [(point.x, point.y) for point in route.points] == [
@@ -32,8 +32,14 @@ def test_pharmacy_is_display_only() -> None:
         (300, 165),
         (300, 270),
     ]
-    assert route.robot_route_id is None
-    assert route.physical_available is False
+    assert route.robot_route_id == "PHARMACY"
+    assert route.physical_available is True
+
+
+def test_toilet_has_physical_route() -> None:
+    route = build_planner().plan("toilet")
+    assert route.robot_route_id == "TOILET"
+    assert route.physical_available is True
 
 
 def test_multiple_destinations_are_planned_in_order() -> None:

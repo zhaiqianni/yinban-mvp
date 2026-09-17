@@ -695,6 +695,10 @@ h1 {
   opacity: 0.42;
 }
 
+.robot-controls button[hidden] {
+  display: none;
+}
+
 .prototype-notice {
   margin-top: 1rem;
   padding: 1rem 1.2rem;

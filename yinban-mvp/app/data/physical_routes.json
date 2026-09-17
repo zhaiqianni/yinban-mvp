@@ -1,0 +1,30 @@
+{
+  "startLocationId": "lobby_start",
+  "startNodeId": "lobby_1f",
+  "routes": {
+    "CARDIOLOGY": {
+      "destination": "cardiology",
+      "destinationName": "3号电梯口",
+      "locationId": "elevator3_1f",
+      "outboundActions": ["S", "X"],
+      "returnActions": ["U", "S", "X"],
+      "physicalNodeIds": ["lobby_1f", "elevator3_1f"]
+    },
+    "TOILET": {
+      "destination": "toilet",
+      "destinationName": "卫生间",
+      "locationId": "toilet_1f",
+      "outboundActions": ["R", "X"],
+      "returnActions": ["U", "L", "X"],
+      "physicalNodeIds": ["lobby_1f", "toilet_1f"]
+    },
+    "PHARMACY": {
+      "destination": "pharmacy",
+      "destinationName": "药房",
+      "locationId": "pharmacy_1f",
+      "outboundActions": ["S", "R", "X"],
+      "returnActions": ["U", "L", "S", "X"],
+      "physicalNodeIds": ["lobby_1f", "elevator3_1f", "pharmacy_1f"]
+    }
+  }
+}

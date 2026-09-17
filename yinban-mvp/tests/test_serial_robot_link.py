@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from app.config import Settings
 from app.services.robot_link import SerialRobotLink, build_robot_controller
 from app.services.robot_protocol import RobotState
+from app.core.data_loader import load_json
+from app.services.physical_routes import PhysicalRouteCatalog
 
 
 class FakeSerial:
@@ -20,6 +22,7 @@ class FakeSerial:
         self.release_write = threading.Event()
         if not block_writes:
             self.release_write.set()
+        self.reads: list[bytes] = []
 
     def write(self, payload: bytes) -> None:
         self.write_started.set()
@@ -31,6 +34,8 @@ class FakeSerial:
     def readline(self) -> bytes:
         if self.fail_reads.is_set():
             raise PermissionError("read denied")
+        if self.reads:
+            return self.reads.pop(0)
         time.sleep(0.005)
         return b""
 
@@ -66,6 +71,10 @@ def wait_until(predicate, timeout: float = 1.0) -> None:
             return
         time.sleep(0.005)
     raise AssertionError("condition did not become true before timeout")
+
+
+def build_catalog() -> PhysicalRouteCatalog:
+    return PhysicalRouteCatalog(load_json("physical_routes.json"))
 
 
 def test_hardware_link_sends_periodic_ping(monkeypatch) -> None:
@@ -116,7 +125,7 @@ def test_initial_open_failures_retry_until_the_port_recovers(monkeypatch) -> Non
     try:
         wait_until(lambda: link.status().connected)
         assert factory.calls >= 3
-        assert link.status().state == RobotState.IDLE
+        assert link.status().state == RobotState.NEEDS_RESET
         assert b"PING\n" in fake.writes
     finally:
         link.close()
@@ -185,6 +194,42 @@ def test_hardware_mode_never_falls_back_to_mock_robot() -> None:
 
     assert isinstance(controller, SerialRobotLink)
     assert controller.mode == "hardware"
+
+
+def test_hardware_route_requires_home_and_sends_validated_run(monkeypatch) -> None:
+    fake = FakeSerial()
+    install_fake_serial(monkeypatch, SerialFactory([fake]))
+    link = SerialRobotLink(
+        "COM5", physical_routes=build_catalog(), reconnect_interval_seconds=0.01
+    )
+    link.connect()
+    try:
+        wait_until(lambda: link.status().connected)
+        assert link.start("PHARMACY")[0] is False
+        fake.reads.append(b"HOME_READY\n")
+        wait_until(lambda: link.status().location_id == "lobby_start")
+        assert link.start("PHARMACY")[0] is True
+        wait_until(lambda: b"RUN:PHARMACY:S,R,X\n" in fake.writes)
+    finally:
+        link.close()
+
+
+def test_hardware_return_requires_matching_arrival(monkeypatch) -> None:
+    fake = FakeSerial()
+    install_fake_serial(monkeypatch, SerialFactory([fake]))
+    link = SerialRobotLink(
+        "COM5", physical_routes=build_catalog(), reconnect_interval_seconds=0.01
+    )
+    link.connect()
+    try:
+        wait_until(lambda: link.status().connected)
+        fake.reads.extend([b"HOME_READY\n", b"ARRIVED:TOILET\n"])
+        wait_until(lambda: link.status().state == RobotState.ARRIVED)
+        assert link.return_to_start("PHARMACY")[0] is False
+        assert link.return_to_start("TOILET")[0] is True
+        wait_until(lambda: b"RUN:RETURN_TOILET:U,L,X\n" in fake.writes)
+    finally:
+        link.close()
 
 
 def test_close_stops_workers_and_releases_the_port(monkeypatch) -> None:

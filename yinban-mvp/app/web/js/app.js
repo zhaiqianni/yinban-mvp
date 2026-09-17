@@ -12,7 +12,10 @@
     robotState: document.getElementById("robot-state"),
     robotDetail: document.getElementById("robot-detail"),
     startButton: document.getElementById("start-button"),
+    returnButton: document.getElementById("return-button"),
     resumeButton: document.getElementById("resume-button"),
+    stopButton: document.getElementById("stop-button"),
+    resetButton: document.getElementById("reset-button"),
     voiceButton: document.getElementById("voice-button"),
     voiceLabel: document.getElementById("voice-label"),
     queryInput: document.getElementById("query-input"),
@@ -50,14 +53,35 @@
   var robotConnected = false;
   var robotPollTimer = null;
   var robotPollInFlight = false;
+  var latestRobotState = null;
+  var latestRobotLocation = null;
+  var robotNeedsReset = false;
+  var availableReturnRouteId = null;
+  var routeIsReturning = false;
+  var lastRobotNodeIndex = 0;
 
   var stateLabels = {
     IDLE: "等待任务",
     MOVING: "正在导引",
+    TURNING: "正在通过路口",
     BLOCKED: "前方有障碍，已停车",
     LINE_LOST: "路线丢失，已停车",
     ARRIVED: "已经到达",
+    NEEDS_RESET: "需要人工归位",
     ERROR: "机器人故障"
+  };
+
+  var physicalRouteDestinations = {
+    CARDIOLOGY: "cardiology",
+    PHARMACY: "pharmacy",
+    TOILET: "toilet"
+  };
+
+  var locationLabels = {
+    lobby_start: "门诊大厅固定起点",
+    elevator3_1f: "3号电梯口",
+    pharmacy_1f: "药房",
+    toilet_1f: "卫生间"
   };
 
   async function api(path, options) {
@@ -108,11 +132,23 @@
 
   function updateStartButton() {
     var hardwareOffline = currentMode === "hardware" && !robotConnected;
-    elements.startButton.disabled = !guideAvailable || hardwareOffline;
-    elements.resumeButton.disabled = hardwareOffline;
+    var atConfirmedStart = latestRobotState === "IDLE" &&
+      latestRobotLocation === "lobby_start" && !robotNeedsReset;
+    var simulationOnly = activeGuideRouteId === "SIMULATION";
+    elements.startButton.disabled = !guideAvailable || hardwareOffline ||
+      (!simulationOnly && !atConfirmedStart);
+    elements.resumeButton.disabled = hardwareOffline || latestRobotState !== "BLOCKED";
+    elements.stopButton.disabled = hardwareOffline ||
+      ["MOVING", "TURNING", "BLOCKED"].indexOf(latestRobotState) < 0;
+    elements.resetButton.disabled = hardwareOffline;
+    elements.returnButton.hidden = !availableReturnRouteId;
+    elements.returnButton.disabled = hardwareOffline || !availableReturnRouteId ||
+      latestRobotState !== "ARRIVED" || robotNeedsReset;
     var simulation = currentMode === "simulation" || activeGuideRouteId === "SIMULATION";
     if (guideAvailable && hardwareOffline) {
       elements.startButton.textContent = "等待机器人重连";
+    } else if (guideAvailable && !simulationOnly && !atConfirmedStart) {
+      elements.startButton.textContent = "请先归位并复位";
     } else if (guideAvailable && simulation) {
       elements.startButton.textContent = "开始模拟导引";
     } else if (guideAvailable) {
@@ -122,6 +158,39 @@
     } else {
       elements.startButton.textContent = "开始导引";
     }
+  }
+
+  function baseRouteId(routeId) {
+    return (routeId || "").replace(/^RETURN_/, "");
+  }
+
+  function prepareReturnRoute(routeId) {
+    var normalized = baseRouteId(routeId);
+    var stopIndex = currentRoutePoints.length - 1;
+    if (normalized === "CARDIOLOGY" && currentPhysicalHandoffNodeId) {
+      stopIndex = currentRoutePoints.findIndex(function (point) {
+        return point.node_id === currentPhysicalHandoffNodeId;
+      });
+    }
+    if (stopIndex < 1) {
+      return;
+    }
+    var returnPoints = currentRoutePoints.slice(0, stopIndex + 1).reverse();
+    var returnLabels = returnPoints.map(function (point) { return point.label; });
+    routeIsReturning = true;
+    lastRobotNodeIndex = 0;
+    renderRoute(
+      returnLabels,
+      "门诊大厅固定起点",
+      true,
+      ["门诊大厅"],
+      returnPoints,
+      true,
+      null
+    );
+    routeIsReturning = true;
+    elements.routeTitle.textContent = "返回门诊大厅";
+    elements.routeNote.textContent = "小车将沿实体黑线返程；到达后恢复固定起点待命。";
   }
 
   function floorName(floor) {
@@ -462,8 +531,9 @@
       : "当前路线位于" + floorName(currentFloorSequence[0] || 1) + "。";
     var simulation = currentMode === "simulation" || activeGuideRouteId === "SIMULATION";
     if (guideAvailable && simulation) {
-      elements.routeNote.textContent =
-        floorText + "点击开始后，地图会在电梯处提示上下楼并自动切换楼层。";
+      elements.routeNote.textContent = currentFloorSequence.length > 1
+        ? floorText + "点击开始后，地图会在电梯处提示上下楼并自动切换楼层。"
+        : floorText + "当前以屏幕动画模拟实体黑线导引和到达状态。";
     } else if (physicalAvailable && currentPhysicalHandoffNodeId) {
       elements.routeNote.textContent =
         floorText + "实体小车只运行至一楼电梯入口，乘梯和三楼路线由屏幕继续模拟。";
@@ -559,6 +629,9 @@
         stepCount: Math.max(2, currentRoutePoints.length)
       });
       if (result.accepted) {
+        routeIsReturning = false;
+        lastRobotNodeIndex = 0;
+        availableReturnRouteId = null;
         guideInProgress = true;
         lastProgressUpdateAt = Date.now();
         setGuideProgress(0, "MOVING");
@@ -578,6 +651,10 @@
       var status = await api("/api/robot/status");
       currentMode = status.mode;
       robotConnected = Boolean(status.connected);
+      latestRobotState = status.state;
+      latestRobotLocation = status.location_id;
+      robotNeedsReset = Boolean(status.needs_reset);
+      availableReturnRouteId = status.return_route_id || null;
       elements.connectionDot.classList.toggle("connected", status.connected);
       elements.modeLabel.textContent =
         status.mode === "hardware"
@@ -600,6 +677,18 @@
             : "路线：" + status.route_id
         );
       }
+      if (status.mission_direction) {
+        details.push(status.mission_direction === "return" ? "方向：返程" : "方向：去程");
+      }
+      if (status.node_index) {
+        details.push("已通过路口：" + status.node_index);
+      }
+      if (status.location_id) {
+        details.push("当前位置：" + (locationLabels[status.location_id] || status.location_id));
+      }
+      if (status.needs_reset) {
+        details.push("请把小车放回门诊大厅左侧起步线，车头朝向3号电梯，再确认归位");
+      }
       if (status.distance_cm !== null) {
         details.push("障碍距离：" + status.distance_cm + " cm");
       }
@@ -612,8 +701,10 @@
         elements.robotState.textContent = "屏幕继续导引";
         elements.robotDetail.textContent = "实体小车已在电梯入口停车，正在模拟跨楼层路线。";
       }
-      if (status.route_id === "CARDIOLOGY" && currentRoute.length === 0) {
-        var restoredRoute = await api("/api/navigation/cardiology");
+      var restoreRouteId = baseRouteId(status.route_id || status.return_route_id);
+      var restoreDestination = physicalRouteDestinations[restoreRouteId];
+      if (restoreDestination && currentRoute.length === 0) {
+        var restoredRoute = await api("/api/navigation/" + restoreDestination);
         activeGuideRouteId = restoredRoute.robot_route_id;
         renderRoute(
           restoredRoute.labels,
@@ -624,7 +715,10 @@
           restoredRoute.physical_available,
           restoredRoute.physical_handoff_node_id
         );
-        guideInProgress = status.state !== "IDLE";
+        if (status.mission_direction === "return") {
+          prepareReturnRoute(restoreRouteId);
+        }
+        guideInProgress = ["MOVING", "TURNING", "BLOCKED"].indexOf(status.state) >= 0;
       }
 
       updateStartButton();
@@ -635,10 +729,51 @@
       ) {
         var now = Date.now();
         var progress = status.progress;
-        if (progress === null || progress === undefined) {
+        if (currentMode === "hardware") {
+          var nodeIndex = Number(status.node_index) || 0;
+          var anchorPointIndex = status.mission_direction === "return"
+            ? nodeIndex
+            : Math.max(0, nodeIndex - 1);
+          anchorPointIndex = Math.min(
+            anchorPointIndex,
+            currentRoutePoints.length - 1
+          );
+          var anchorProgress = progressAtPoint(anchorPointIndex);
+          if (nodeIndex !== lastRobotNodeIndex) {
+            currentGuideProgress = anchorProgress;
+            lastProgressUpdateAt = now;
+            lastRobotNodeIndex = nodeIndex;
+          }
           if (status.state === "ARRIVED") {
             progress = 1;
+          } else if (status.state === "TURNING") {
+            progress = anchorProgress;
+          } else if (status.state === "BLOCKED") {
+            progress = currentGuideProgress;
           } else if (status.state === "MOVING") {
+            if (status.mission_direction !== "return" && nodeIndex === 0) {
+              progress = 0;
+            } else {
+              var nextPointIndex = Math.min(
+                anchorPointIndex + 1,
+                currentRoutePoints.length - 1
+              );
+              var nextProgress = progressAtPoint(nextPointIndex);
+              var elapsedSinceNode = lastProgressUpdateAt
+                ? now - lastProgressUpdateAt
+                : 0;
+              progress = Math.min(
+                Math.max(anchorProgress, nextProgress - 0.01),
+                Math.max(anchorProgress, currentGuideProgress + elapsedSinceNode / 9000)
+              );
+            }
+          } else {
+            progress = currentGuideProgress;
+          }
+        } else if (progress === null || progress === undefined) {
+          if (status.state === "ARRIVED") {
+            progress = 1;
+          } else if (status.state === "MOVING" || status.state === "TURNING") {
             var elapsed = lastProgressUpdateAt ? now - lastProgressUpdateAt : 0;
             progress = Math.min(0.92, currentGuideProgress + elapsed / 15000);
           } else {
@@ -678,10 +813,21 @@
           speak("已经到达" + arrivedAt + "，请留意门牌和现场工作人员指引。");
         }
       }
+      if (routeIsReturning && status.state === "IDLE" && status.location_id === "lobby_start") {
+        guideInProgress = false;
+        routeIsReturning = false;
+        setGuideProgress(1, "ARRIVED");
+        elements.robotState.textContent = "已返回门诊大厅";
+        elements.robotDetail.textContent = "小车已回到固定起点，可以选择下一项任务。";
+        speak("已经返回门诊大厅固定起点。");
+      }
       lastRobotState = status.state;
     } catch (error) {
       nextDelay = 2000;
       robotConnected = false;
+      latestRobotState = "ERROR";
+      latestRobotLocation = null;
+      robotNeedsReset = true;
       elements.connectionDot.classList.remove("connected");
       elements.modeLabel.textContent = "后端连接失败";
       elements.robotState.textContent = "系统离线";
@@ -755,6 +901,24 @@
     submitQuery("我要去心内科", true);
   });
   elements.startButton.addEventListener("click", startRobot);
+  elements.returnButton.addEventListener("click", function () {
+    if (!availableReturnRouteId) {
+      showToast("当前没有可执行的返程任务。", true);
+      return;
+    }
+    var routeId = availableReturnRouteId;
+    robotCommand("return", {routeId: routeId}).then(function (result) {
+      if (result.accepted) {
+        cancelScreenContinuation();
+        prepareReturnRoute(routeId);
+        guideInProgress = true;
+        lastProgressUpdateAt = Date.now();
+        setGuideProgress(0, "MOVING");
+      }
+    }).catch(function (error) {
+      showToast(error.message, true);
+    });
+  });
   document.getElementById("resume-button").addEventListener("click", function () {
     robotCommand("resume").then(function (result) {
       if (result.accepted) {
@@ -765,7 +929,7 @@
       showToast(error.message, true);
     });
   });
-  document.getElementById("stop-button").addEventListener("click", function () {
+  elements.stopButton.addEventListener("click", function () {
     robotCommand("stop").then(function (result) {
       if (result.accepted) {
         cancelScreenContinuation();
@@ -775,11 +939,23 @@
       showToast(error.message, true);
     });
   });
-  document.getElementById("reset-button").addEventListener("click", function () {
+  elements.resetButton.addEventListener("click", function () {
+    var confirmed = window.confirm(
+      "请先把小车放回门诊大厅左侧固定起步线，并让车头朝向3号电梯。确认摆放正确后再复位。"
+    );
+    if (!confirmed) {
+      return;
+    }
     robotCommand("reset").then(function (result) {
       if (result.accepted) {
         cancelScreenContinuation();
         guideInProgress = false;
+        routeIsReturning = false;
+        availableReturnRouteId = null;
+        lastRobotNodeIndex = 0;
+        latestRobotState = "IDLE";
+        latestRobotLocation = "lobby_start";
+        robotNeedsReset = false;
         lastProgressUpdateAt = null;
         setGuideProgress(0, "IDLE");
         updateStartButton();

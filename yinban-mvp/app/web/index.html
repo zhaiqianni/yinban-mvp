@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23efad36'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='30'%3E%E9%93%B6%3C/text%3E%3C/svg%3E">
   <meta name="theme-color" content="#0b5c4d">
   <title>银伴｜医院智能陪诊导引</title>
   <link rel="stylesheet" href="/static/css/app.css?v=20260910-floor3">
@@ -50,14 +51,14 @@
           <span class="quick-icon" aria-hidden="true">药</span>
           <span>
             <strong>去药房</strong>
-            <small>一楼 · 可模拟导引</small>
+            <small>一楼 · 支持实体导引</small>
           </span>
         </button>
         <button class="quick-card toilet" type="button" data-query="厕所在哪里">
           <span class="quick-icon" aria-hidden="true">洗</span>
           <span>
             <strong>找卫生间</strong>
-            <small>一楼 · 服务台旁</small>
+            <small>一楼 · 支持实体导引</small>
           </span>
         </button>
         <button class="quick-card help" type="button" data-query="我不舒服，需要工作人员帮助">
@@ -103,7 +104,7 @@
         <ol id="route-steps" class="route-steps">
           <li class="empty-step">选择一个地点后，这里会显示路线。</li>
         </ol>
-        <p id="route-note" class="route-note">已规划路线均可进行屏幕模拟；实体小车目前只支持心内科。</p>
+        <p id="route-note" class="route-note">心内科、药房和卫生间支持实体导引及返程，其余路线可在屏幕上查看。</p>
       </div>
       <div class="map-card">
         <div class="map-toolbar" aria-label="楼层地图切换">
@@ -183,9 +184,10 @@
       </div>
       <div class="robot-controls">
         <button id="start-button" class="primary-control" type="button" disabled>开始导引</button>
+        <button id="return-button" class="primary-control" type="button" hidden disabled>返回门诊大厅</button>
         <button id="resume-button" type="button">继续</button>
         <button id="stop-button" class="danger-control" type="button">停止导引</button>
-        <button id="reset-button" type="button">复位</button>
+        <button id="reset-button" type="button">确认归位并复位</button>
       </div>
     </section>
 
@@ -196,6 +198,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/js/app.js?v=20260917-auto-reconnect"></script>
+  <script src="/static/js/app.js?v=20260917-multi-route-return"></script>
 </body>
 </html>

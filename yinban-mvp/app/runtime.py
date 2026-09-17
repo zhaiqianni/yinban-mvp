@@ -8,6 +8,7 @@ from app.core.dialogue_engine import DialogueEngine
 from app.core.intent_router import IntentRouter
 from app.core.route_planner import RoutePlanner
 from app.services.robot_link import RobotController, build_robot_controller
+from app.services.physical_routes import PhysicalRouteCatalog
 
 
 @dataclass
@@ -16,6 +17,7 @@ class Runtime:
     intent_router: IntentRouter
     dialogue_engine: DialogueEngine
     route_planner: RoutePlanner
+    physical_routes: PhysicalRouteCatalog
     robot: RobotController
 
 
@@ -27,11 +29,12 @@ def build_runtime(
     hospital = load_json("hospital.json")
     intents = load_json("intents.json")
     routes = load_json("routes.json")
+    physical_routes = PhysicalRouteCatalog(load_json("physical_routes.json"))
     return Runtime(
         settings=active_settings,
         intent_router=IntentRouter(hospital, intents),
         dialogue_engine=DialogueEngine(hospital),
         route_planner=RoutePlanner(routes, hospital["startNode"]),
-        robot=robot or build_robot_controller(active_settings),
+        physical_routes=physical_routes,
+        robot=robot or build_robot_controller(active_settings, physical_routes),
     )
-

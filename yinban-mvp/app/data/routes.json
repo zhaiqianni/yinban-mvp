@@ -24,8 +24,8 @@
       "robotRouteId": "CARDIOLOGY",
       "physicalHandoffNodeId": "elevator3_1f"
     },
-    "pharmacy": {"node": "pharmacy_1f", "robotRouteId": null},
-    "toilet": {"node": "toilet_1f", "robotRouteId": null},
+    "pharmacy": {"node": "pharmacy_1f", "robotRouteId": "PHARMACY"},
+    "toilet": {"node": "toilet_1f", "robotRouteId": "TOILET"},
     "laboratory": {"node": "laboratory_1f", "robotRouteId": null},
     "registration": {"node": "registration_1f", "robotRouteId": null}
   }

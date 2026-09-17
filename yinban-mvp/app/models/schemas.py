@@ -51,6 +51,12 @@ class RobotStartRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class RobotReturnRequest(BaseModel):
+    route_id: str = Field(alias="routeId", min_length=1, max_length=40)
+
+    model_config = {"populate_by_name": True}
+
+
 class CommandResponse(BaseModel):
     accepted: bool
     mode: str
@@ -65,4 +71,9 @@ class RobotStatusResponse(BaseModel):
     distance_cm: float | None = None
     error: str | None = None
     progress: float | None = Field(default=None, ge=0, le=1)
+    mission_direction: str | None = None
+    node_index: int = Field(default=0, ge=0)
+    location_id: str | None = None
+    needs_reset: bool = False
+    return_route_id: str | None = None
     updated_at: datetime

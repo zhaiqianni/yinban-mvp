@@ -5,11 +5,14 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from app.config import Settings
+from app.core.data_loader import load_json
 from app.services.mock_robot import MockRobot
+from app.services.physical_routes import PhysicalRouteCatalog
 from app.services.robot_protocol import (
     RobotSnapshot,
     RobotState,
     encode_command,
+    encode_run_command,
     parse_event,
 )
 
@@ -22,6 +25,8 @@ class RobotController(Protocol):
     def close(self) -> None: ...
 
     def start(self, route_id: str, step_count: int = 2) -> tuple[bool, str]: ...
+
+    def return_to_start(self, route_id: str) -> tuple[bool, str]: ...
 
     def stop(self) -> tuple[bool, str]: ...
 
@@ -40,11 +45,15 @@ class SerialRobotLink:
         self,
         port: str,
         baud: int = 115200,
+        physical_routes: PhysicalRouteCatalog | None = None,
         reconnect_interval_seconds: float = 2.0,
     ) -> None:
         self.port = port
         self.baud = baud
         self.reconnect_interval_seconds = reconnect_interval_seconds
+        self._routes = physical_routes or PhysicalRouteCatalog(
+            load_json("physical_routes.json")
+        )
         self._serial: Any | None = None
         self._worker: threading.Thread | None = None
         self._heartbeat: threading.Thread | None = None
@@ -56,6 +65,7 @@ class SerialRobotLink:
             mode=self.mode,
             connected=False,
             state=RobotState.ERROR,
+            needs_reset=True,
             error=self._waiting_message(),
             updated_at=datetime.now(UTC),
         )
@@ -80,6 +90,7 @@ class SerialRobotLink:
                 mode=self.mode,
                 connected=False,
                 state=RobotState.ERROR,
+                needs_reset=True,
                 error=self._waiting_message(),
                 updated_at=datetime.now(UTC),
             )
@@ -111,6 +122,7 @@ class SerialRobotLink:
                 connected=False,
                 state=RobotState.ERROR,
                 route_id=previous_route,
+                needs_reset=True,
                 error="机器人连接服务已停止",
                 updated_at=datetime.now(UTC),
             )
@@ -125,10 +137,43 @@ class SerialRobotLink:
                 self._heartbeat = None
 
     def start(self, route_id: str, step_count: int = 2) -> tuple[bool, str]:
-        if route_id != "CARDIOLOGY":
+        normalized = route_id.strip().upper()
+        if not self._routes.supports(normalized):
             return False, "该实体路线尚未实现"
-        accepted = self._write("START", route_id)
+        with self._state_lock:
+            snapshot = self._snapshot
+        if not snapshot.connected:
+            return False, "出发指令发送失败"
+        if (
+            snapshot.state != RobotState.IDLE
+            or snapshot.needs_reset
+            or snapshot.location_id != self._routes.start_location_id
+        ):
+            return False, "小车不在已确认的固定起点，请先归位并复位"
+        actions = self._routes.actions_for_mission(normalized)
+        accepted = self._write_run(normalized, actions)
         return accepted, "已发送出发指令" if accepted else "出发指令发送失败"
+
+    def return_to_start(self, route_id: str) -> tuple[bool, str]:
+        normalized = route_id.strip().upper()
+        if not self._routes.supports(normalized):
+            return False, "该实体返程路线尚未实现"
+        route = self._routes.get(normalized)
+        with self._state_lock:
+            snapshot = self._snapshot
+        if not snapshot.connected:
+            return False, "返程指令发送失败"
+        if (
+            snapshot.state != RobotState.ARRIVED
+            or snapshot.needs_reset
+            or snapshot.location_id != route.location_id
+            or snapshot.return_route_id != normalized
+        ):
+            return False, "当前位置与返程路线不匹配，不能启动返程"
+        mission_id = self._routes.return_mission_id(normalized)
+        actions = self._routes.actions_for_mission(mission_id)
+        accepted = self._write_run(mission_id, actions)
+        return accepted, "已发送返程指令" if accepted else "返程指令发送失败"
 
     def stop(self) -> tuple[bool, str]:
         accepted = self._write("STOP")
@@ -174,16 +219,7 @@ class SerialRobotLink:
                 with self._state_lock:
                     if self._serial is not connection:
                         continue
-                    previous_route = self._snapshot.route_id
-                    self._snapshot = RobotSnapshot(
-                        mode=self.mode,
-                        connected=True,
-                        state=event.state,
-                        route_id=event.route_id or previous_route,
-                        distance_cm=event.distance_cm,
-                        error=event.error,
-                        updated_at=datetime.now(UTC),
-                    )
+                    self._snapshot = self._snapshot_for_event(event)
             except ValueError:
                 continue
             except Exception as exc:
@@ -230,7 +266,9 @@ class SerialRobotLink:
                     self._snapshot = RobotSnapshot(
                         mode=self.mode,
                         connected=True,
-                        state=RobotState.IDLE,
+                        state=RobotState.NEEDS_RESET,
+                        needs_reset=True,
+                        error="通信已恢复，请将小车放回固定起点并确认归位",
                         updated_at=datetime.now(UTC),
                     )
             if already_connected:
@@ -244,6 +282,20 @@ class SerialRobotLink:
         self,
         command: str,
         value: str | None = None,
+        *,
+        expected_connection: Any | None = None,
+    ) -> bool:
+        return self._write_bytes(
+            encode_command(command, value),
+            expected_connection=expected_connection,
+        )
+
+    def _write_run(self, mission_id: str, actions: tuple[str, ...]) -> bool:
+        return self._write_bytes(encode_run_command(mission_id, actions))
+
+    def _write_bytes(
+        self,
+        payload: bytes,
         *,
         expected_connection: Any | None = None,
     ) -> bool:
@@ -262,7 +314,7 @@ class SerialRobotLink:
                 with self._state_lock:
                     if self._serial is not connection:
                         return False
-                connection.write(encode_command(command, value))
+                connection.write(payload)
             return True
         except Exception as exc:
             self._mark_disconnected(
@@ -281,6 +333,10 @@ class SerialRobotLink:
                 connected=False,
                 state=RobotState.ERROR,
                 route_id=previous_route,
+                mission_direction=self._snapshot.mission_direction,
+                node_index=self._snapshot.node_index,
+                location_id=None,
+                needs_reset=True,
                 error=error,
                 updated_at=datetime.now(UTC),
             )
@@ -296,6 +352,10 @@ class SerialRobotLink:
                 connected=False,
                 state=RobotState.ERROR,
                 route_id=previous_route,
+                mission_direction=self._snapshot.mission_direction,
+                node_index=self._snapshot.node_index,
+                location_id=None,
+                needs_reset=True,
                 error=error,
                 updated_at=datetime.now(UTC),
             )
@@ -315,10 +375,92 @@ class SerialRobotLink:
             if self._current_connection() is not None:
                 self._write("PING")
 
+    def _snapshot_for_event(self, event) -> RobotSnapshot:
+        previous = self._snapshot
+        now = datetime.now(UTC)
+        if event.location_id == self._routes.start_location_id:
+            return RobotSnapshot(
+                mode=self.mode,
+                connected=True,
+                state=RobotState.IDLE,
+                location_id=self._routes.start_location_id,
+                needs_reset=False,
+                updated_at=now,
+            )
+        if event.needs_reset:
+            return RobotSnapshot(
+                mode=self.mode,
+                connected=True,
+                state=event.state,
+                route_id=event.route_id or previous.route_id,
+                mission_direction=previous.mission_direction,
+                node_index=event.node_index or previous.node_index,
+                needs_reset=True,
+                error=event.error,
+                updated_at=now,
+            )
+        if event.state == RobotState.IDLE:
+            return RobotSnapshot(
+                mode=self.mode,
+                connected=True,
+                state=RobotState.NEEDS_RESET,
+                needs_reset=True,
+                error="固件尚未确认固定起点，请人工归位并复位",
+                updated_at=now,
+            )
 
-def build_robot_controller(settings: Settings) -> RobotController:
+        route_id = event.route_id or previous.route_id
+        direction = previous.mission_direction
+        if event.route_id:
+            direction = "return" if event.route_id.startswith("RETURN_") else "outbound"
+        node_index = event.node_index if event.node_index is not None else previous.node_index
+        location_id = previous.location_id
+        return_route_id = previous.return_route_id
+        if event.state in {RobotState.MOVING, RobotState.TURNING}:
+            location_id = None
+            return_route_id = None
+        if event.state == RobotState.ARRIVED and event.route_id:
+            try:
+                location_id = self._routes.location_for_arrival(event.route_id)
+                base_route_id = self._routes.base_route_id(event.route_id)
+            except KeyError:
+                return RobotSnapshot(
+                    mode=self.mode,
+                    connected=True,
+                    state=RobotState.ERROR,
+                    route_id=event.route_id,
+                    needs_reset=True,
+                    error="固件返回了未知路线",
+                    updated_at=now,
+                )
+            return_route_id = None if direction == "return" else base_route_id
+        return RobotSnapshot(
+            mode=self.mode,
+            connected=True,
+            state=event.state,
+            route_id=route_id,
+            distance_cm=event.distance_cm,
+            error=event.error,
+            mission_direction=direction,
+            node_index=node_index,
+            location_id=location_id,
+            needs_reset=False,
+            return_route_id=return_route_id,
+            updated_at=now,
+        )
+
+
+def build_robot_controller(
+    settings: Settings,
+    physical_routes: PhysicalRouteCatalog | None = None,
+) -> RobotController:
+    routes = physical_routes or PhysicalRouteCatalog(load_json("physical_routes.json"))
     if settings.mode == "hardware":
-        return SerialRobotLink(settings.robot_port, settings.robot_baud)
+        return SerialRobotLink(
+            settings.robot_port, settings.robot_baud, physical_routes=routes
+        )
     if settings.mode == "auto" and settings.robot_port:
-        return SerialRobotLink(settings.robot_port, settings.robot_baud)
-    return MockRobot()
+        return SerialRobotLink(
+            settings.robot_port, settings.robot_baud, physical_routes=routes
+        )
+    return MockRobot(physical_routes=routes)
